@@ -1,4 +1,4 @@
-import {
+﻿import {
   Injectable,
   UnauthorizedException,
   ForbiddenException,
@@ -29,7 +29,7 @@ import { RedisService } from '../common/redis/redis.service';
 import { OAuthProviderFactory } from './providers/oauth-provider.factory';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 
-// ─── Type for session data stored in Redis ───
+// â”€â”€â”€ Type for session data stored in Redis â”€â”€â”€
 interface SessionData {
   userId: string;
   tokenId: string;
@@ -56,9 +56,9 @@ export class AuthService {
     private readonly oauthProviderFactory: OAuthProviderFactory,
   ) {}
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // OAuth Login
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async oauthLogin(
     provider: OAuthProvider,
@@ -93,7 +93,7 @@ export class AuthService {
     let isNewUser = false;
 
     if (oauthAccount) {
-      // ── Returning user ──
+      // â”€â”€ Returning user â”€â”€
       user = oauthAccount.user;
 
       // FIX #5: Use query builder for jsonb update to avoid TypeORM deep partial type issues
@@ -118,7 +118,7 @@ export class AuthService {
         `Returning user: userId=${user.id}, provider=${provider}`,
       );
     } else {
-      // ── New OAuth account ──
+      // â”€â”€ New OAuth account â”€â”€
 
       // Check if user exists by email (for account linking)
       if (userInfo.email && !this.isApplePrivateRelay(userInfo.email)) {
@@ -202,9 +202,9 @@ export class AuthService {
     };
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Token Generation
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async generateTokenPair(
     user: User,
@@ -243,6 +243,8 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       type: 'access',
+      role: user.role,
+      subscriptionActive: false,
     };
 
     const accessToken: string = this.jwtService.sign(accessPayload, {
@@ -254,6 +256,8 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       type: 'refresh',
+      role: user.role,
+      subscriptionActive: false,
       jti: tokenId,
       family: familyId,
     };
@@ -304,9 +308,9 @@ export class AuthService {
     };
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Token Refresh
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async refreshTokens(
     refreshTokenValue: string,
@@ -358,7 +362,7 @@ export class AuthService {
     // 4. CRITICAL: Check for token reuse (security breach detection)
     if (storedToken.isRevoked) {
       this.logger.error(
-        `🚨 REFRESH TOKEN REUSE DETECTED: userId=${storedToken.userId}, familyId=${storedToken.familyId}`,
+        `ðŸš¨ REFRESH TOKEN REUSE DETECTED: userId=${storedToken.userId}, familyId=${storedToken.familyId}`,
       );
 
       // Revoke ALL tokens in the family
@@ -374,7 +378,7 @@ export class AuthService {
       });
     }
 
-    // 5. Check token expiry (belt-and-suspenders — JWT verify already checks)
+    // 5. Check token expiry (belt-and-suspenders â€” JWT verify already checks)
     if (storedToken.expiresAt < new Date()) {
       throw new UnauthorizedException({
         code: 'AUTH_REFRESH_TOKEN_EXPIRED',
@@ -417,9 +421,9 @@ export class AuthService {
     return tokens;
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Logout
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async logout(
     user: User,
@@ -467,9 +471,9 @@ export class AuthService {
     this.logger.log(`All sessions revoked: userId=${user.id}`);
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Session Management
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async getActiveSessions(
     userId: string,
@@ -510,7 +514,7 @@ export class AuthService {
           current: tokenId === currentTokenId,
         });
       } else {
-        // Session expired in Redis — clean up the set
+        // Session expired in Redis â€” clean up the set
         await this.redisService.setRemove(userSessionsKey, tokenId);
       }
     }
@@ -548,9 +552,9 @@ export class AuthService {
     );
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // User Profile
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   async getProfile(userId: string): Promise<SanitizedUser> {
     const user = await this.userRepository.findOne({
@@ -572,7 +576,7 @@ export class AuthService {
     userId: string,
     dto: UpdateProfileDto,
   ): Promise<SanitizedUser> {
-    // FIX #2: Build a plain object for update — not Partial<User> which includes relationships
+    // FIX #2: Build a plain object for update â€” not Partial<User> which includes relationships
     const updateData: Record<string, string> = {};
 
     if (dto.displayName !== undefined) {
@@ -626,9 +630,9 @@ export class AuthService {
     this.logger.log(`Account deleted: userId=${user.id}`);
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Public Helpers (used by controller)
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   /**
    * Safely decode a JWT without verification.
@@ -646,9 +650,9 @@ export class AuthService {
     }
   }
 
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
   // Private Helper Methods
-  // ═══════════════════════════════════════════
+  // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
   private hashToken(token: string): string {
     return createHash('sha256').update(token).digest('hex');
@@ -709,6 +713,8 @@ export class AuthService {
       displayName: user.displayName,
       avatarUrl: user.avatarUrl,
       status: user.status,
+      role: user.role,
+      subscriptionActive: false,
       storageUsed: user.storageUsed,
       storageLimit: user.storageLimit,
       createdAt: user.createdAt,

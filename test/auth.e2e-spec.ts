@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-unsafe-argument */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   BadRequestException,
   CanActivate,
@@ -21,6 +21,7 @@ import { BruteForceGuard } from '../src/auth/guards/brute-force.guard';
 import { OAuthProvider } from '../src/auth/enums/oauth-provider.enum';
 import { User } from '../src/auth/entities/user.entity';
 import { UserStatus } from '../src/auth/enums/user-status.enum';
+import { UserRole } from '../src/auth/enums/user-role.enum';
 import { IS_PUBLIC_KEY } from '../src/auth/decorators/public.decorator';
 import { GlobalExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';
@@ -31,6 +32,7 @@ const mockCurrentUser: User = {
   displayName: 'E2E User',
   avatarUrl: null,
   status: UserStatus.ACTIVE,
+  role: UserRole.USER,
   storageUsed: 0,
   storageLimit: 5368709120,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -164,6 +166,8 @@ describe('Auth API (e2e)', () => {
         displayName: mockCurrentUser.displayName,
         avatarUrl: mockCurrentUser.avatarUrl,
         status: mockCurrentUser.status,
+        role: mockCurrentUser.role,
+        subscriptionActive: false,
         storageUsed: 0,
         storageLimit: 5368709120,
         createdAt: mockCurrentUser.createdAt,
@@ -184,6 +188,8 @@ describe('Auth API (e2e)', () => {
       displayName: mockCurrentUser.displayName,
       avatarUrl: mockCurrentUser.avatarUrl,
       status: mockCurrentUser.status,
+      role: mockCurrentUser.role,
+      subscriptionActive: false,
       storageUsed: 0,
       storageLimit: 5368709120,
       createdAt: mockCurrentUser.createdAt,
@@ -197,6 +203,8 @@ describe('Auth API (e2e)', () => {
       displayName: 'Updated Name',
       avatarUrl: 'https://example.com/a.png',
       status: mockCurrentUser.status,
+      role: mockCurrentUser.role,
+      subscriptionActive: false,
       storageUsed: 0,
       storageLimit: 5368709120,
       createdAt: mockCurrentUser.createdAt,

@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -11,6 +11,7 @@ import {
 import { OAuthAccount } from './oauth-account.entity';
 import { RefreshToken } from './refresh-token.entity';
 import { UserStatus } from '../enums/user-status.enum';
+import { UserRole } from '../enums/user-role.enum';
 
 @Entity('users')
 export class User {
@@ -48,6 +49,14 @@ export class User {
     default: UserStatus.ACTIVE,
   })
   status: UserStatus;
+
+  @Index('idx_users_role')
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: UserRole.USER,
+  })
+  role: UserRole;
 
   @Column({
     name: 'storage_used',

@@ -1,4 +1,4 @@
-import { Test, TestingModule } from '@nestjs/testing';
+﻿import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -17,6 +17,7 @@ import { RefreshToken } from '../entities/refresh-token.entity';
 import { RedisService } from '../../common/redis/redis.service';
 import { OAuthProviderFactory } from '../providers/oauth-provider.factory';
 import { UserStatus } from '../enums/user-status.enum';
+import { UserRole } from '../enums/user-role.enum';
 import { OAuthProvider } from '../enums/oauth-provider.enum';
 
 describe('AuthService', () => {
@@ -39,6 +40,7 @@ describe('AuthService', () => {
     displayName: 'Test User',
     avatarUrl: null,
     status: UserStatus.ACTIVE,
+    role: UserRole.USER,
     storageUsed: 0,
     storageLimit: 5368709120,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
