@@ -1,5 +1,6 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { AddressInfo } from 'net';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { GlobalExceptionFilter } from './common/filters/http-exception.filter';
@@ -53,16 +54,57 @@ async function bootstrap(): Promise<void> {
 
   // Global Filters & Interceptors (added after Swagger to avoid interfering with docs)
   app.useGlobalFilters(new GlobalExceptionFilter());
-  app.useGlobalInterceptors(
-    new LoggingInterceptor(),
-    new TransformInterceptor(),
+  const accessLogEnabled =
+    process.env.HTTP_ACCESS_LOG_ENABLED?.toLowerCase() === 'true';
+  if (accessLogEnabled) {
+    app.useGlobalInterceptors(
+      new LoggingInterceptor(),
+      new TransformInterceptor(),
+    );
+  } else {
+    app.useGlobalInterceptors(new TransformInterceptor());
+  }
+
+  const port = parseInt(process.env.PORT || '3000', 10);
+  const host = process.env.HOST || '0.0.0.0';
+  const keepAliveTimeout = parseInt(
+    process.env.HTTP_KEEP_ALIVE_TIMEOUT || '65000',
+    10,
+  );
+  const headersTimeout = parseInt(
+    process.env.HTTP_HEADERS_TIMEOUT || '66000',
+    10,
+  );
+  const requestTimeout = parseInt(
+    process.env.HTTP_REQUEST_TIMEOUT || '120000',
+    10,
   );
 
-  const port = process.env.PORT || 3000;
-  await app.listen(port);
+  const server = (await app.listen(port, host)) as unknown as {
+    keepAliveTimeout: number;
+    headersTimeout: number;
+    requestTimeout: number;
+    address(): AddressInfo | string | null;
+  };
 
-  logger.log(`Frame API running on http://localhost:${port}/${apiPrefix}`);
-  logger.log(`Health check: http://localhost:${port}/${apiPrefix}/health`);
+  server.keepAliveTimeout = keepAliveTimeout;
+  server.headersTimeout = headersTimeout;
+  server.requestTimeout = requestTimeout;
+
+  const boundAddress = server.address();
+  const listenHost =
+    typeof boundAddress === 'object' && boundAddress
+      ? boundAddress.address
+      : host;
+  const listenPort =
+    typeof boundAddress === 'object' && boundAddress ? boundAddress.port : port;
+
+  logger.log(
+    `Frame API running on http://${listenHost}:${listenPort}/${apiPrefix}`,
+  );
+  logger.log(
+    `Health check: http://${listenHost}:${listenPort}/${apiPrefix}/health`,
+  );
   logger.log(`Environment: ${process.env.NODE_ENV}`);
 }
 

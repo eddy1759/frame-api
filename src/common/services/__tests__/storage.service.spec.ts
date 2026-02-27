@@ -1,0 +1,114 @@
+import { ConfigService } from '@nestjs/config';
+import { InternalServerErrorException } from '@nestjs/common';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { StorageService } from '../storage.service';
+
+jest.mock('@aws-sdk/s3-request-presigner', () => ({
+  getSignedUrl: jest.fn(),
+}));
+
+describe('StorageService', () => {
+  const storageConfig = {
+    endpoint: 'http://localhost:9000',
+    region: 'us-east-1',
+    accessKeyId: 'minioadmin',
+    secretAccessKey: 'minioadmin',
+    bucket: 'frame-assets',
+    forcePathStyle: true,
+    useSsl: false,
+    cdnBaseUrl: 'http://localhost:9000/frame-assets',
+  };
+
+  const createService = (): {
+    service: StorageService;
+    send: jest.Mock;
+  } => {
+    const configService = {
+      get: jest.fn().mockReturnValue(storageConfig),
+    } as unknown as ConfigService;
+
+    const service = new StorageService(configService);
+    const send = jest.fn();
+    (service as unknown as { client: { send: jest.Mock } }).client = {
+      send,
+    };
+
+    return { service, send };
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('creates bucket on module init when bucket is missing', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValueOnce(new Error('missing bucket'));
+    send.mockResolvedValueOnce({});
+
+    await service.onModuleInit();
+
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('uploads buffers and returns storage metadata', async () => {
+    const { service, send } = createService();
+    send.mockResolvedValueOnce({});
+
+    const result = await service.uploadBuffer(
+      '/frames/frame-1/original.svg',
+      Buffer.from('svg'),
+      'image/svg+xml',
+    );
+
+    expect(result).toEqual({
+      key: 'frames/frame-1/original.svg',
+      url: 'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+      size: 3,
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws internal server error when upload fails', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValueOnce(new Error('upload failed'));
+
+    await expect(
+      service.uploadBuffer(
+        'frames/frame-1/original.svg',
+        Buffer.from('x'),
+        'image/svg+xml',
+      ),
+    ).rejects.toBeInstanceOf(InternalServerErrorException);
+  });
+
+  it('swallows delete errors', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValueOnce(new Error('delete failed'));
+
+    await expect(
+      service.deleteObject('frames/frame-1/original.svg'),
+    ).resolves.toBeUndefined();
+  });
+
+  it('builds CDN URLs from storage keys', () => {
+    const { service } = createService();
+    expect(service.getPublicUrl('/frames/frame-1/original.svg')).toBe(
+      'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+    );
+  });
+
+  it('generates presigned urls', async () => {
+    const { service } = createService();
+    (getSignedUrl as jest.Mock).mockResolvedValueOnce(
+      'https://signed.example/upload',
+    );
+
+    const url = await service.generatePresignedUrl(
+      '/frames/frame-1/original.svg',
+      120,
+    );
+
+    expect(url).toBe('https://signed.example/upload');
+    expect(getSignedUrl).toHaveBeenCalledTimes(1);
+  });
+});

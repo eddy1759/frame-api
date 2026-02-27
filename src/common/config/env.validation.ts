@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+  IsBoolean,
   IsEnum,
   IsNotEmpty,
   IsNumber,
@@ -26,11 +27,15 @@ class EnvironmentVariables {
   @Max(65535)
   PORT: number = 3000;
 
+  @IsOptional()
+  @IsString()
+  HOST?: string = '0.0.0.0';
+
   @IsString()
   @IsNotEmpty()
   API_PREFIX: string = 'v1';
 
-  // ── Database ──
+  // Database
   @IsString()
   @IsNotEmpty()
   DB_HOST: string = 'localhost';
@@ -58,7 +63,7 @@ class EnvironmentVariables {
   @IsOptional()
   DB_POOL_MIN: number = 5;
 
-  // ── Redis ──
+  // Redis
   @IsString()
   @IsNotEmpty()
   REDIS_HOST: string = 'localhost';
@@ -70,7 +75,7 @@ class EnvironmentVariables {
   @IsString()
   REDIS_PASSWORD?: string;
 
-  // ── JWT ──
+  // JWT
   @IsString()
   @IsNotEmpty()
   JWT_PRIVATE_KEY_PATH: string = '';
@@ -85,6 +90,7 @@ class EnvironmentVariables {
   @IsNumber()
   JWT_REFRESH_TOKEN_TTL: number = 2592000;
 
+  // OAuth
   @IsString()
   @IsNotEmpty()
   GOOGLE_CLIENT_ID: string = '';
@@ -93,6 +99,7 @@ class EnvironmentVariables {
   @IsNotEmpty()
   APPLE_CLIENT_ID: string = '';
 
+  // Security
   @IsString()
   @IsNotEmpty()
   ENCRYPTION_KEY: string = '';
@@ -106,6 +113,53 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGINS?: string;
+
+  @IsNumber()
+  @IsOptional()
+  HTTP_KEEP_ALIVE_TIMEOUT: number = 65000;
+
+  @IsNumber()
+  @IsOptional()
+  HTTP_HEADERS_TIMEOUT: number = 66000;
+
+  @IsNumber()
+  @IsOptional()
+  HTTP_REQUEST_TIMEOUT: number = 120000;
+
+  @IsBoolean()
+  @IsOptional()
+  HTTP_ACCESS_LOG_ENABLED: boolean = false;
+
+  // Object storage
+  @IsString()
+  @IsNotEmpty()
+  OBJECT_STORAGE_ENDPOINT: string = 'http://localhost:9000';
+
+  @IsString()
+  @IsNotEmpty()
+  OBJECT_STORAGE_REGION: string = 'us-east-1';
+
+  @IsString()
+  @IsNotEmpty()
+  OBJECT_STORAGE_ACCESS_KEY: string = 'minioadmin';
+
+  @IsString()
+  @IsNotEmpty()
+  OBJECT_STORAGE_SECRET_KEY: string = 'minioadmin';
+
+  @IsString()
+  @IsNotEmpty()
+  OBJECT_STORAGE_BUCKET: string = 'frame-assets';
+
+  @IsBoolean()
+  OBJECT_STORAGE_FORCE_PATH_STYLE: boolean = true;
+
+  @IsBoolean()
+  OBJECT_STORAGE_USE_SSL: boolean = false;
+
+  @IsString()
+  @IsNotEmpty()
+  CDN_BASE_URL: string = 'http://localhost:9000/frame-assets';
 }
 
 export function validate(
@@ -131,7 +185,7 @@ export function validate(
       .join('\n');
 
     throw new Error(
-      `\n\n🚨 Environment validation failed:\n${errorMessages}\n\nPlease check your .env file.\n`,
+      `\n\nEnvironment validation failed:\n${errorMessages}\n\nPlease check your .env file.\n`,
     );
   }
 

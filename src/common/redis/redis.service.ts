@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+﻿import { Inject, Injectable, Logger } from '@nestjs/common';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from './redis.constants';
 
@@ -45,28 +45,79 @@ export class RedisService {
     await this.redis.expire(key, ttlSeconds);
   }
 
+  async zIncrBy(
+    key: string,
+    increment: number,
+    member: string,
+  ): Promise<number> {
+    const result = await this.redis.zincrby(key, increment, member);
+    return Number(result);
+  }
+
+  async zRevRangeWithScores(
+    key: string,
+    start: number,
+    stop: number,
+  ): Promise<Array<{ member: string; score: number }>> {
+    const result = await this.redis.zrevrange(key, start, stop, 'WITHSCORES');
+    const pairs: Array<{ member: string; score: number }> = [];
+
+    for (let i = 0; i < result.length; i += 2) {
+      const member = result[i];
+      const score = Number(result[i + 1]);
+      if (member !== undefined && !Number.isNaN(score)) {
+        pairs.push({ member, score });
+      }
+    }
+
+    return pairs;
+  }
+
+  async zRangeWithScores(
+    key: string,
+    start = 0,
+    stop = -1,
+  ): Promise<Array<{ member: string; score: number }>> {
+    const result = await this.redis.zrange(key, start, stop, 'WITHSCORES');
+    const pairs: Array<{ member: string; score: number }> = [];
+
+    for (let i = 0; i < result.length; i += 2) {
+      const member = result[i];
+      const score = Number(result[i + 1]);
+      if (member !== undefined && !Number.isNaN(score)) {
+        pairs.push({ member, score });
+      }
+    }
+
+    return pairs;
+  }
+
   async deleteByPattern(pattern: string): Promise<void> {
     const keys = await this.redis.keys(pattern);
-    if (keys.length > 0) {
-      // strip the keys from the prefix before deleting
-      const pipeline = this.redis.pipeline();
-      for (const key of keys) {
-        // Strip the key prefix since ioredis adds it automatically
-        const strippedKey = key.replace(/^frame:/, '');
-        pipeline.del(strippedKey);
-      }
-      await pipeline.exec();
+    if (keys.length === 0) {
+      return;
     }
+
+    const pipeline = this.redis.pipeline();
+    for (const key of keys) {
+      const strippedKey = key.replace(/^frame:/, '');
+      pipeline.del(strippedKey);
+    }
+
+    await pipeline.exec();
   }
 
   /**
-   * Check Redis connectivity
+   * Check Redis connectivity.
    */
   async ping(): Promise<boolean> {
     try {
       const result = await this.redis.ping();
       return result === 'PONG';
-    } catch {
+    } catch (error) {
+      this.logger.warn(
+        `Redis ping failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
       return false;
     }
   }
