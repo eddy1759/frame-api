@@ -126,7 +126,7 @@ export class CreateFramesSchema1772302100000 implements MigrationInterface {
       `CREATE INDEX "idx_frame_created_by" ON "frames" ("created_by")`,
     );
     await queryRunner.query(
-      `CREATE INDEX "idx_frame_fts" ON "frames" USING GIN (to_tsvector('english', COALESCE("name", '') || ' ' || COALESCE("description", '')))`
+      `CREATE INDEX "idx_frame_fts" ON "frames" USING GIN (to_tsvector('english', COALESCE("name", '') || ' ' || COALESCE("description", '')))`,
     );
 
     await queryRunner.query(
@@ -188,21 +188,41 @@ export class CreateFramesSchema1772302100000 implements MigrationInterface {
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
-    await queryRunner.query(`ALTER TABLE "user_saved_frames" DROP CONSTRAINT "FK_saved_frames_frame"`);
-    await queryRunner.query(`ALTER TABLE "user_saved_frames" DROP CONSTRAINT "FK_saved_frames_user"`);
-    await queryRunner.query(`ALTER TABLE "frame_tags" DROP CONSTRAINT "FK_frame_tags_tag"`);
-    await queryRunner.query(`ALTER TABLE "frame_tags" DROP CONSTRAINT "FK_frame_tags_frame"`);
-    await queryRunner.query(`ALTER TABLE "frame_categories" DROP CONSTRAINT "FK_frame_categories_category"`);
-    await queryRunner.query(`ALTER TABLE "frame_categories" DROP CONSTRAINT "FK_frame_categories_frame"`);
-    await queryRunner.query(`ALTER TABLE "frame_assets" DROP CONSTRAINT "FK_frame_assets_frame"`);
-    await queryRunner.query(`ALTER TABLE "frames" DROP CONSTRAINT "FK_frames_created_by"`);
-    await queryRunner.query(`ALTER TABLE "categories" DROP CONSTRAINT "FK_category_parent"`);
+    await queryRunner.query(
+      `ALTER TABLE "user_saved_frames" DROP CONSTRAINT "FK_saved_frames_frame"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "user_saved_frames" DROP CONSTRAINT "FK_saved_frames_user"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frame_tags" DROP CONSTRAINT "FK_frame_tags_tag"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frame_tags" DROP CONSTRAINT "FK_frame_tags_frame"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frame_categories" DROP CONSTRAINT "FK_frame_categories_category"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frame_categories" DROP CONSTRAINT "FK_frame_categories_frame"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frame_assets" DROP CONSTRAINT "FK_frame_assets_frame"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "frames" DROP CONSTRAINT "FK_frames_created_by"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "categories" DROP CONSTRAINT "FK_category_parent"`,
+    );
 
     await queryRunner.query(`DROP INDEX "public"."idx_saved_at"`);
     await queryRunner.query(`DROP INDEX "public"."idx_saved_frame"`);
     await queryRunner.query(`DROP INDEX "public"."idx_saved_user"`);
     await queryRunner.query(`DROP INDEX "public"."idx_frame_tags_tag"`);
-    await queryRunner.query(`DROP INDEX "public"."idx_frame_categories_category"`);
+    await queryRunner.query(
+      `DROP INDEX "public"."idx_frame_categories_category"`,
+    );
     await queryRunner.query(`DROP INDEX "public"."idx_asset_type"`);
     await queryRunner.query(`DROP INDEX "public"."idx_asset_frame"`);
     await queryRunner.query(`DROP INDEX "public"."idx_frame_fts"`);

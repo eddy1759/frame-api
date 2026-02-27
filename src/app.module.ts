@@ -27,7 +27,13 @@ import { FramesModule } from './frames/frames.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, redisConfig, jwtConfig, throttleConfig, storageConfig],
+      load: [
+        databaseConfig,
+        redisConfig,
+        jwtConfig,
+        throttleConfig,
+        storageConfig,
+      ],
       validate,
       envFilePath: ['.env'],
     }),
@@ -75,6 +81,3 @@ import { FramesModule } from './frames/frames.module';
   providers: [AppService],
 })
 export class AppModule {}
-
-
-

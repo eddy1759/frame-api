@@ -137,7 +137,9 @@ export class CategoriesService {
       query.andWhere('category.frameCount > 0');
     }
 
-    query.orderBy('category.sortOrder', 'ASC').addOrderBy('category.name', 'ASC');
+    query
+      .orderBy('category.sortOrder', 'ASC')
+      .addOrderBy('category.name', 'ASC');
 
     return query.getMany();
   }
@@ -173,28 +175,29 @@ export class CategoriesService {
     }
 
     for (const categoryId of [...new Set(categoryIds)]) {
-      const rows = (await this.categoryRepository.query(
+      const rawRows: unknown = await this.categoryRepository.query(
         `SELECT COUNT(*)::int AS count
          FROM "frame_categories" fc
          JOIN "frames" f ON f."id" = fc."frame_id"
          WHERE fc."category_id" = $1
            AND f."is_active" = true`,
         [categoryId],
-      )) as unknown[];
-
-      const firstRow =
-        rows.length > 0
-          ? (rows[0] as {
-              count?: number | string;
-            })
-          : undefined;
-      const count = Number(firstRow?.count ?? 0);
+      );
+      const rows = Array.isArray(rawRows) ? rawRows : [];
+      const firstRow = rows[0];
+      const countValue =
+        typeof firstRow === 'object' && firstRow !== null && 'count' in firstRow
+          ? (firstRow as { count?: number | string }).count
+          : 0;
+      const count = Number(countValue ?? 0);
       await this.categoryRepository.update(categoryId, { frameCount: count });
     }
   }
 
   private async assertCategoryExists(categoryId: string): Promise<void> {
-    const exists = await this.categoryRepository.exist({ where: { id: categoryId } });
+    const exists = await this.categoryRepository.exist({
+      where: { id: categoryId },
+    });
     if (!exists) {
       throw new NotFoundException({
         code: 'CATEGORY_NOT_FOUND',

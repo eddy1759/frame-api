@@ -24,7 +24,10 @@ export class TagsService {
     const normalized = this.normalizeTagName(dto.name);
 
     const existing = await this.tagRepository.findOne({
-      where: [{ name: normalized }, { slug: this.slugService.toSlug(normalized) }],
+      where: [
+        { name: normalized },
+        { slug: this.slugService.toSlug(normalized) },
+      ],
     });
 
     if (existing) {
@@ -34,8 +37,9 @@ export class TagsService {
       });
     }
 
-    const slug = await this.slugService.generateUniqueSlug(normalized, (value) =>
-      this.tagRepository.exist({ where: { slug: value } }),
+    const slug = await this.slugService.generateUniqueSlug(
+      normalized,
+      (value) => this.tagRepository.exist({ where: { slug: value } }),
     );
 
     const entity = this.tagRepository.create({
@@ -72,13 +76,16 @@ export class TagsService {
       }
 
       tag.name = normalized;
-      tag.slug = await this.slugService.generateUniqueSlug(normalized, async (value) => {
-        const duplicate = await this.tagRepository.findOne({
-          where: { slug: value },
-          select: ['id'],
-        });
-        return !!duplicate && duplicate.id !== id;
-      });
+      tag.slug = await this.slugService.generateUniqueSlug(
+        normalized,
+        async (value) => {
+          const duplicate = await this.tagRepository.findOne({
+            where: { slug: value },
+            select: ['id'],
+          });
+          return !!duplicate && duplicate.id !== id;
+        },
+      );
     }
 
     const updated = await this.tagRepository.save(tag);
@@ -97,7 +104,10 @@ export class TagsService {
       });
     }
 
-    await this.tagRepository.query(`DELETE FROM "frame_tags" WHERE "tag_id" = $1`, [id]);
+    await this.tagRepository.query(
+      `DELETE FROM "frame_tags" WHERE "tag_id" = $1`,
+      [id],
+    );
     await this.tagRepository.delete(id);
     await this.framesCacheService.invalidateTags();
     await this.framesCacheService.invalidateFramesList();
@@ -118,7 +128,11 @@ export class TagsService {
   }
 
   async findOrCreateByNames(names: string[]): Promise<Tag[]> {
-    const normalizedNames = [...new Set(names.map((name) => this.normalizeTagName(name)).filter(Boolean))];
+    const normalizedNames = [
+      ...new Set(
+        names.map((name) => this.normalizeTagName(name)).filter(Boolean),
+      ),
+    ];
     const tags: Tag[] = [];
 
     for (const name of normalizedNames) {
@@ -145,22 +159,21 @@ export class TagsService {
     }
 
     for (const tagId of [...new Set(tagIds)]) {
-      const rows = (await this.tagRepository.query(
+      const rawRows: unknown = await this.tagRepository.query(
         `SELECT COUNT(*)::int AS count
          FROM "frame_tags" ft
          JOIN "frames" f ON f."id" = ft."frame_id"
          WHERE ft."tag_id" = $1
            AND f."is_active" = true`,
         [tagId],
-      )) as unknown[];
-
-      const firstRow =
-        rows.length > 0
-          ? (rows[0] as {
-              count?: number | string;
-            })
-          : undefined;
-      const count = Number(firstRow?.count ?? 0);
+      );
+      const rows = Array.isArray(rawRows) ? rawRows : [];
+      const firstRow = rows[0];
+      const countValue =
+        typeof firstRow === 'object' && firstRow !== null && 'count' in firstRow
+          ? (firstRow as { count?: number | string }).count
+          : 0;
+      const count = Number(countValue ?? 0);
       await this.tagRepository.update(tagId, { usageCount: count });
     }
   }

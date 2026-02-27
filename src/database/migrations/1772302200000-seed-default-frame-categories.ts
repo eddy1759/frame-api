@@ -1,8 +1,6 @@
 ﻿import { MigrationInterface, QueryRunner } from 'typeorm';
 
-export class SeedDefaultFrameCategories1772302200000
-  implements MigrationInterface
-{
+export class SeedDefaultFrameCategories1772302200000 implements MigrationInterface {
   name = 'SeedDefaultFrameCategories1772302200000';
 
   public async up(queryRunner: QueryRunner): Promise<void> {

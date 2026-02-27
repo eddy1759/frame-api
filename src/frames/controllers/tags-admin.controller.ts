@@ -37,7 +37,10 @@ export class TagsAdminController {
   @Post()
   @ApiOperation({ summary: 'Create tag' })
   @ApiResponse({ status: 201, description: 'Tag created' })
-  async create(@Body() dto: CreateTagDto, @Req() req: Request): Promise<unknown> {
+  async create(
+    @Body() dto: CreateTagDto,
+    @Req() req: Request,
+  ): Promise<unknown> {
     await this.throttleGuard.checkRateLimit(req, {
       limit: 60,
       ttlSeconds: 60,

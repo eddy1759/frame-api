@@ -18,4 +18,3 @@ export class FrameCategory {
   @JoinColumn({ name: 'category_id' })
   category: Category;
 }
-

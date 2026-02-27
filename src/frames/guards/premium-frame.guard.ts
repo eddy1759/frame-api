@@ -72,4 +72,3 @@ export class PremiumFrameGuard implements CanActivate {
     return true;
   }
 }
-

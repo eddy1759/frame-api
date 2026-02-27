@@ -22,7 +22,9 @@ export class CreateCategoryDto {
   @IsString()
   description?: string;
 
-  @ApiPropertyOptional({ example: 'https://cdn.frame.app/categories/wedding.png' })
+  @ApiPropertyOptional({
+    example: 'https://cdn.frame.app/categories/wedding.png',
+  })
   @IsOptional()
   @IsString()
   iconUrl?: string;

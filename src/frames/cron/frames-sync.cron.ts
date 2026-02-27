@@ -19,8 +19,12 @@ export class FramesSyncCron {
 
   @Cron('0 */15 * * * *')
   async syncPopularity(): Promise<void> {
-    const viewScores = await this.cacheService.zRangeWithScores('popular:frames:views');
-    const applyScores = await this.cacheService.zRangeWithScores('popular:frames:applies');
+    const viewScores = await this.cacheService.zRangeWithScores(
+      'popular:frames:views',
+    );
+    const applyScores = await this.cacheService.zRangeWithScores(
+      'popular:frames:applies',
+    );
 
     let updatedRows = 0;
     let totalViews = 0;
@@ -29,7 +33,11 @@ export class FramesSyncCron {
     for (const entry of viewScores) {
       const increment = Math.max(0, Math.floor(entry.score));
       if (increment === 0) continue;
-      await this.frameRepository.increment({ id: entry.member }, 'viewCount', increment);
+      await this.frameRepository.increment(
+        { id: entry.member },
+        'viewCount',
+        increment,
+      );
       updatedRows += 1;
       totalViews += increment;
     }
@@ -37,7 +45,11 @@ export class FramesSyncCron {
     for (const entry of applyScores) {
       const increment = Math.max(0, Math.floor(entry.score));
       if (increment === 0) continue;
-      await this.frameRepository.increment({ id: entry.member }, 'applyCount', increment);
+      await this.frameRepository.increment(
+        { id: entry.member },
+        'applyCount',
+        increment,
+      );
       updatedRows += 1;
       totalApplies += increment;
     }
@@ -57,5 +69,3 @@ export class FramesSyncCron {
     }
   }
 }
-
-

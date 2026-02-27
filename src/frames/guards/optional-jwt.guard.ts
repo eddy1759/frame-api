@@ -1,4 +1,9 @@
-﻿import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
+﻿import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -41,11 +46,7 @@ export class OptionalJwtGuard implements CanActivate {
         where: { id: payload.sub },
       });
 
-      if (
-        user &&
-        user.status === UserStatus.ACTIVE &&
-        !user.deletedAt
-      ) {
+      if (user && user.status === UserStatus.ACTIVE && !user.deletedAt) {
         (request as Request & { user?: User }).user = user;
       }
     } catch (error) {

@@ -44,7 +44,9 @@ export class FrameAssetsService {
       large: string;
     };
   }> {
-    const frame = await this.frameRepository.findOne({ where: { id: frameId } });
+    const frame = await this.frameRepository.findOne({
+      where: { id: frameId },
+    });
 
     if (!frame) {
       throw new NotFoundException({
@@ -87,13 +89,21 @@ export class FrameAssetsService {
     const largeKey = `frames/${frameId}/thumbnail-lg.png`;
 
     const [smallUpload, mediumUpload, largeUpload] = await Promise.all([
-      this.storageService.uploadBuffer(smallKey, thumbnailSmall.buffer, 'image/png'),
+      this.storageService.uploadBuffer(
+        smallKey,
+        thumbnailSmall.buffer,
+        'image/png',
+      ),
       this.storageService.uploadBuffer(
         mediumKey,
         thumbnailMedium.buffer,
         'image/png',
       ),
-      this.storageService.uploadBuffer(largeKey, thumbnailLarge.buffer, 'image/png'),
+      this.storageService.uploadBuffer(
+        largeKey,
+        thumbnailLarge.buffer,
+        'image/png',
+      ),
     ]);
 
     await this.frameAssetRepository.delete({ frameId });
@@ -160,8 +170,8 @@ export class FrameAssetsService {
     const parser = new DOMParser({
       errorHandler: {
         warning: () => undefined,
-        error: (msg) => parseErrors.push(msg),
-        fatalError: (msg) => parseErrors.push(msg),
+        error: (msg: unknown) => parseErrors.push(String(msg)),
+        fatalError: (msg: unknown) => parseErrors.push(String(msg)),
       },
     });
 
@@ -208,7 +218,11 @@ export class FrameAssetsService {
           continue;
         }
 
-        if (attrName === 'href' || attrName === 'xlink:href' || attrName === 'src') {
+        if (
+          attrName === 'href' ||
+          attrName === 'xlink:href' ||
+          attrName === 'src'
+        ) {
           if (this.isExternalReference(attrValue)) {
             attrsToRemove.push(String(attr.name));
           }
@@ -262,7 +276,9 @@ export class FrameAssetsService {
       return false;
     }
 
-    return /^(https?:)?\/\//i.test(normalized) || /^javascript:/i.test(normalized);
+    return (
+      /^(https?:)?\/\//i.test(normalized) || /^javascript:/i.test(normalized)
+    );
   }
 
   private containsExternalCssUrl(value: string): boolean {
@@ -288,4 +304,3 @@ export class FrameAssetsService {
     };
   }
 }
-
