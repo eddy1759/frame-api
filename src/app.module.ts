@@ -1,9 +1,10 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppService } from './app.service';
 
 import {
@@ -11,6 +12,7 @@ import {
   redisConfig,
   jwtConfig,
   throttleConfig,
+  storageConfig,
   validate,
 } from './common/config';
 import { JwtConfig } from './common/config/jwt.config';
@@ -18,12 +20,14 @@ import { JwtConfig } from './common/config/jwt.config';
 import { RedisModule } from './common/redis/redis.module';
 import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
+import { SharedModule } from './common/shared.module';
+import { FramesModule } from './frames/frames.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, redisConfig, jwtConfig, throttleConfig],
+      load: [databaseConfig, redisConfig, jwtConfig, throttleConfig, storageConfig],
       validate,
       envFilePath: ['.env'],
     }),
@@ -38,6 +42,7 @@ import { AuthModule } from './auth/auth.module';
         return dbConfig;
       },
     }),
+    ScheduleModule.forRoot(),
     JwtModule.registerAsync({
       global: true,
       imports: [ConfigModule],
@@ -61,10 +66,15 @@ import { AuthModule } from './auth/auth.module';
     }),
 
     RedisModule,
+    SharedModule,
     HealthModule,
     AuthModule,
+    FramesModule,
   ],
   controllers: [],
   providers: [AppService],
 })
 export class AppModule {}
+
+
+
