@@ -1,17 +1,24 @@
-﻿import {
+﻿/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
+import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import sharp from 'sharp';
-import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { Frame } from '../entities/frame.entity';
 import { FrameAsset } from '../entities/frame-asset.entity';
 import { FrameAssetType } from '../entities/frame-asset-type.enum';
-import { StorageService } from '../../common/services';
+import { STORAGE_PORT, StoragePort } from '../../common/services';
 import { FramesCacheService } from './frames-cache.service';
+import { JSDOM } from 'jsdom';
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sharp: typeof import('sharp') = require('sharp');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const createDOMPurify = require('dompurify');
 
 const MAX_SVG_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -22,6 +29,9 @@ interface UploadedSvgFile {
   originalname?: string;
 }
 
+const window = new JSDOM('').window;
+const purify = createDOMPurify(window);
+
 @Injectable()
 export class FrameAssetsService {
   constructor(
@@ -29,7 +39,8 @@ export class FrameAssetsService {
     private readonly frameRepository: Repository<Frame>,
     @InjectRepository(FrameAsset)
     private readonly frameAssetRepository: Repository<FrameAsset>,
-    private readonly storageService: StorageService,
+    @Inject(STORAGE_PORT)
+    private readonly storageService: StoragePort,
     private readonly framesCacheService: FramesCacheService,
   ) {}
 
@@ -80,9 +91,13 @@ export class FrameAssetsService {
       'image/svg+xml',
     );
 
-    const thumbnailSmall = await this.createThumbnail(svgBuffer, 150);
-    const thumbnailMedium = await this.createThumbnail(svgBuffer, 300);
-    const thumbnailLarge = await this.createThumbnail(svgBuffer, 600);
+    const [thumbnailSmall, thumbnailMedium, thumbnailLarge] = await Promise.all(
+      [
+        this.createThumbnail(svgBuffer, 150),
+        this.createThumbnail(svgBuffer, 300),
+        this.createThumbnail(svgBuffer, 600),
+      ],
+    );
 
     const smallKey = `frames/${frameId}/thumbnail-sm.png`;
     const mediumKey = `frames/${frameId}/thumbnail-md.png`;
@@ -166,123 +181,107 @@ export class FrameAssetsService {
   }
 
   private sanitizeSvg(svg: string): string {
-    const parseErrors: string[] = [];
-    const parser = new DOMParser({
-      errorHandler: {
-        warning: () => undefined,
-        error: (msg: unknown) => parseErrors.push(String(msg)),
-        fatalError: (msg: unknown) => parseErrors.push(String(msg)),
-      },
-    });
-
-    const document = parser.parseFromString(svg, 'image/svg+xml');
-
-    if (
-      parseErrors.length > 0 ||
-      !document.documentElement ||
-      document.documentElement.nodeName.toLowerCase() !== 'svg'
-    ) {
+    if (!svg || typeof svg !== 'string') {
       throw new BadRequestException({
         code: 'INVALID_SVG',
-        message: 'Uploaded file is not valid SVG XML.',
+        message: 'An SVG file is required.',
       });
     }
 
-    const blockedElements = new Set(['script', 'use', 'foreignobject']);
-
-    const cleanseElement = (node: Node): void => {
-      if (node.nodeType !== 1) {
-        return;
-      }
-
-      const element = node as Element;
-      const tagName = element.tagName.toLowerCase();
-
-      if (blockedElements.has(tagName)) {
-        if (element.parentNode) {
-          element.parentNode.removeChild(element);
-        }
-        return;
-      }
-
-      const attrsToRemove: string[] = [];
-      for (let i = 0; i < element.attributes.length; i += 1) {
-        const attr = element.attributes.item(i);
-        if (!attr) continue;
-
-        const attrName = String(attr.name ?? '').toLowerCase();
-        const attrValue = String(attr.value ?? '').trim();
-
-        if (attrName.startsWith('on')) {
-          attrsToRemove.push(String(attr.name));
-          continue;
-        }
-
-        if (
-          attrName === 'href' ||
-          attrName === 'xlink:href' ||
-          attrName === 'src'
-        ) {
-          if (this.isExternalReference(attrValue)) {
-            attrsToRemove.push(String(attr.name));
-          }
-          continue;
-        }
-
-        if (attrName === 'style' && this.containsExternalCssUrl(attrValue)) {
-          attrsToRemove.push(String(attr.name));
-        }
-      }
-
-      for (const attrName of attrsToRemove) {
-        element.removeAttribute(attrName);
-      }
-
-      if (tagName === 'style') {
-        const styleContent = element.textContent ?? '';
-        const sanitizedStyle = styleContent.replace(
-          /url\(\s*(['"]?)(https?:\/\/|\/\/|javascript:)[^)]+\)/gi,
-          'none',
-        );
-        element.textContent = sanitizedStyle;
-      }
-
-      const children: Node[] = [];
-      for (let i = 0; i < element.childNodes.length; i += 1) {
-        const child = element.childNodes.item(i);
-        if (child) {
-          children.push(child);
-        }
-      }
-
-      for (const child of children) {
-        cleanseElement(child);
-      }
-    };
-
-    cleanseElement(document.documentElement);
-
-    return new XMLSerializer().serializeToString(document);
-  }
-
-  private isExternalReference(value: string): boolean {
-    const normalized = value.trim().replace(/^['"]|['"]$/g, '');
-
-    if (!normalized) {
-      return false;
+    // Block dangerous XML constructs early
+    if (/<!DOCTYPE/i.test(svg)) {
+      throw new BadRequestException({
+        code: 'INVALID_SVG',
+        message: 'DOCTYPE is not allowed in SVG uploads.',
+      });
     }
 
-    if (normalized.startsWith('#')) {
-      return false;
+    // Strict DOMPurify sanitization (allowlist only)
+    const clean = purify.sanitize(svg, {
+      USE_PROFILES: { svg: true },
+
+      // Only allow safe structural SVG elements
+      ALLOWED_TAGS: [
+        'svg',
+        'g',
+        'path',
+        'circle',
+        'rect',
+        'line',
+        'polyline',
+        'polygon',
+        'ellipse',
+      ],
+
+      // Only allow safe visual attributes
+      ALLOWED_ATTR: [
+        'd',
+        'fill',
+        'stroke',
+        'stroke-width',
+        'viewBox',
+        'width',
+        'height',
+        'cx',
+        'cy',
+        'r',
+        'x',
+        'y',
+        'points',
+      ],
+
+      // Explicitly block all risky surfaces
+      FORBID_TAGS: [
+        'script',
+        'style',
+        'foreignObject',
+        'iframe',
+        'object',
+        'embed',
+        'use',
+        'image',
+        'feImage',
+      ],
+
+      FORBID_ATTR: ['on*', 'href', 'xlink:href', 'src', 'style'],
+
+      ALLOW_DATA_ATTR: false,
+      ALLOW_UNKNOWN_PROTOCOLS: false,
+      KEEP_CONTENT: false,
+      RETURN_TRUSTED_TYPE: false,
+    });
+
+    // Structural validation (post-sanitize)
+    const dom = new JSDOM(clean, { contentType: 'image/svg+xml' });
+    const root = dom.window.document.documentElement;
+
+    if (!root || root.nodeName.toLowerCase() !== 'svg') {
+      throw new BadRequestException({
+        code: 'INVALID_SVG',
+        message: 'Uploaded file is not a valid SVG.',
+      });
     }
 
-    return (
-      /^(https?:)?\/\//i.test(normalized) || /^javascript:/i.test(normalized)
+    // Final hard check: kill any protocol usage
+    const serialized = new dom.window.XMLSerializer().serializeToString(
+      dom.window.document,
     );
-  }
 
-  private containsExternalCssUrl(value: string): boolean {
-    return /url\(\s*(['"]?)(https?:\/\/|\/\/|javascript:)/i.test(value);
+    if (/(javascript:|data:|blob:|file:)/i.test(serialized)) {
+      throw new BadRequestException({
+        code: 'INVALID_SVG',
+        message: 'SVG contains unsafe references.',
+      });
+    }
+
+    if (!serialized.includes('<svg')) {
+      throw new BadRequestException({
+        code: 'SANITIZATION_FAILED',
+        message: 'SVG could not be sanitized.',
+      });
+    }
+
+    return serialized;
   }
 
   private async createThumbnail(

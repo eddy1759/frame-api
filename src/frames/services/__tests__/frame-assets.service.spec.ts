@@ -3,7 +3,7 @@ import { Repository } from 'typeorm';
 import { Frame } from '../../entities/frame.entity';
 import { FrameAsset } from '../../entities/frame-asset.entity';
 import { FrameAssetsService } from '../frame-assets.service';
-import { StorageService } from '../../../common/services';
+import { StoragePort } from '../../../common/services';
 import { FramesCacheService } from '../frames-cache.service';
 import { FrameOrientation } from '../../entities/frame-orientation.enum';
 
@@ -11,7 +11,7 @@ describe('FrameAssetsService', () => {
   let service: FrameAssetsService;
   let frameRepository: jest.Mocked<Repository<Frame>>;
   let frameAssetRepository: jest.Mocked<Repository<FrameAsset>>;
-  let storageService: jest.Mocked<StorageService>;
+  let storageService: jest.Mocked<StoragePort>;
   let framesCacheService: jest.Mocked<FramesCacheService>;
 
   const makeFrame = (overrides: Partial<Frame> = {}): Frame =>
@@ -60,7 +60,7 @@ describe('FrameAssetsService', () => {
 
     storageService = {
       uploadBuffer: jest.fn(),
-    } as unknown as jest.Mocked<StorageService>;
+    } as unknown as jest.Mocked<StoragePort>;
 
     framesCacheService = {
       invalidateFrame: jest.fn(),

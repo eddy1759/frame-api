@@ -14,9 +14,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { StorageConfig } from '../config/storage.config';
+import { StoragePort, StorageUploadResult } from './storage/storage.port';
 
 @Injectable()
-export class StorageService implements OnModuleInit {
+export class StorageService implements OnModuleInit, StoragePort {
   private readonly logger = new Logger(StorageService.name);
   private readonly config: StorageConfig;
   private readonly client: S3Client;
@@ -47,7 +48,7 @@ export class StorageService implements OnModuleInit {
     key: string,
     body: Buffer,
     contentType: string,
-  ): Promise<{ key: string; url: string; size: number }> {
+  ): Promise<StorageUploadResult> {
     const normalizedKey = this.normalizeKey(key);
 
     try {

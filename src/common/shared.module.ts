@@ -5,10 +5,26 @@ import {
   SlugService,
   StorageService,
 } from './services';
+import { STORAGE_PORT } from './services/storage/storage.tokens';
 
 @Global()
 @Module({
-  providers: [CacheService, PaginationService, SlugService, StorageService],
-  exports: [CacheService, PaginationService, SlugService, StorageService],
+  providers: [
+    CacheService,
+    PaginationService,
+    SlugService,
+    StorageService,
+    {
+      provide: STORAGE_PORT,
+      useExisting: StorageService,
+    },
+  ],
+  exports: [
+    CacheService,
+    PaginationService,
+    SlugService,
+    StorageService,
+    STORAGE_PORT,
+  ],
 })
 export class SharedModule {}
