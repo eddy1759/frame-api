@@ -8,6 +8,21 @@ import { TransformInterceptor } from './common/interceptors/transform.intercepto
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { setupSwagger } from './common/config/swagger.config';
 
+const port = parseInt(process.env.PORT || '3000', 10);
+const host = process.env.HOST || '0.0.0.0';
+const keepAliveTimeout = parseInt(
+  process.env.HTTP_KEEP_ALIVE_TIMEOUT || '65000',
+  10,
+);
+const headersTimeout = parseInt(
+  process.env.HTTP_HEADERS_TIMEOUT || '66000',
+  10,
+);
+const requestTimeout = parseInt(
+  process.env.HTTP_REQUEST_TIMEOUT || '120000',
+  10,
+);
+
 async function bootstrap(): Promise<void> {
   const logger = new Logger('Bootstrap');
 
@@ -56,7 +71,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new GlobalExceptionFilter());
   const accessLogEnabled =
     process.env.HTTP_ACCESS_LOG_ENABLED?.toLowerCase() === 'true';
-  if (accessLogEnabled) {
+  if (accessLogEnabled || process.env.NODE_ENV === 'production') {
     app.useGlobalInterceptors(
       new LoggingInterceptor(),
       new TransformInterceptor(),
@@ -64,21 +79,6 @@ async function bootstrap(): Promise<void> {
   } else {
     app.useGlobalInterceptors(new TransformInterceptor());
   }
-
-  const port = parseInt(process.env.PORT || '3000', 10);
-  const host = process.env.HOST || '0.0.0.0';
-  const keepAliveTimeout = parseInt(
-    process.env.HTTP_KEEP_ALIVE_TIMEOUT || '65000',
-    10,
-  );
-  const headersTimeout = parseInt(
-    process.env.HTTP_HEADERS_TIMEOUT || '66000',
-    10,
-  );
-  const requestTimeout = parseInt(
-    process.env.HTTP_REQUEST_TIMEOUT || '120000',
-    10,
-  );
 
   const server = (await app.listen(port, host)) as unknown as {
     keepAliveTimeout: number;
