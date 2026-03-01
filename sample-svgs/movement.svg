@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e2e8f0" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#e2e8f0" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#e2e8f0" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#16a34a" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#16a34a" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <path d="M170 156 L320 156" stroke="#22c55e" stroke-width="14" stroke-linecap="round"/>
+    <path d="M320 156 L292 132 M320 156 L292 180" stroke="#22c55e" stroke-width="14" stroke-linecap="round"/>
+    <path d="M760 156 L910 156" stroke="#22c55e" stroke-width="14" stroke-linecap="round"/>
+    <path d="M910 156 L882 132 M910 156 L882 180" stroke="#22c55e" stroke-width="14" stroke-linecap="round"/>
+    <path d="M186 1700 L310 1620" stroke="#4ade80" stroke-width="12" stroke-linecap="round"/>
+    <path d="M894 1700 L770 1620" stroke="#4ade80" stroke-width="12" stroke-linecap="round"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#e2e8f0">Movement Frame</text>
+</svg>

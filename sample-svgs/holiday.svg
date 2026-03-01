@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0c4a6e"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fef9c3" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#fef9c3" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#fef9c3" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#0284c7" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#0284c7" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <path d="M220 122 L220 186 M188 154 L252 154 M198 132 L242 176 M198 176 L242 132" stroke="#e0f2fe" stroke-width="8" stroke-linecap="round"/>
+    <path d="M860 122 L860 186 M828 154 L892 154 M838 132 L882 176 M838 176 L882 132" stroke="#e0f2fe" stroke-width="8" stroke-linecap="round"/>
+    <rect x="260" y="1702" width="560" height="62" rx="20" fill="#ef4444" opacity="0.45"/>
+    <rect x="520" y="1702" width="40" height="62" fill="#fee2e2" opacity="0.85"/>
+    <rect x="260" y="1728" width="560" height="12" fill="#fee2e2" opacity="0.75"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#fef9c3">Holiday Frame</text>
+</svg>

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff7ed"/>
+      <stop offset="100%" stop-color="#fb923c"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#9a3412" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#9a3412" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#9a3412" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#fb923c" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#fb923c" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <circle cx="220" cy="136" r="42" fill="#60a5fa"/>
+    <circle cx="320" cy="120" r="36" fill="#f472b6"/>
+    <circle cx="860" cy="136" r="42" fill="#f97316"/>
+    <circle cx="760" cy="120" r="36" fill="#22c55e"/>
+    <rect x="230" y="1710" width="620" height="34" rx="14" fill="#fdba74"/>
+    <rect x="530" y="1668" width="20" height="46" rx="8" fill="#fef08a"/>
+    <circle cx="540" cy="1654" r="12" fill="#facc15"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#9a3412">Birthday Frame</text>
+</svg>

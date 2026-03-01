@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#fff1f2"/>
+      <stop offset="100%" stop-color="#f472b6"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#be185d" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#be185d" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#be185d" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#f472b6" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#f472b6" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <path d="M220 120 C220 86,260 80,272 112 C284 80,324 86,324 120 C324 146,298 166,272 192 C246 166,220 146,220 120Z" fill="#ec4899"/>
+    <path d="M756 120 C756 86,796 80,808 112 C820 80,860 86,860 120 C860 146,834 166,808 192 C782 166,756 146,756 120Z" fill="#ec4899"/>
+    <circle cx="270" cy="1760" r="32" fill="none" stroke="#f9a8d4" stroke-width="12"/>
+    <circle cx="810" cy="1760" r="32" fill="none" stroke="#f9a8d4" stroke-width="12"/>
+    <path d="M300 1760 L780 1760" stroke="#fbcfe8" stroke-width="8" stroke-linecap="round"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#be185d">Wedding Frame</text>
+</svg>

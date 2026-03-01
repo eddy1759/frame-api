@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#dbeafe" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#dbeafe" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#dbeafe" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#2563eb" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#2563eb" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <polygon points="540,74 700,144 540,214 380,144" fill="#93c5fd" opacity="0.7"/>
+    <rect x="518" y="214" width="44" height="30" rx="8" fill="#93c5fd"/>
+    <path d="M250 1738 C330 1684, 410 1684, 490 1738" fill="none" stroke="#bfdbfe" stroke-width="10"/>
+    <path d="M590 1738 C670 1684, 750 1684, 830 1738" fill="none" stroke="#bfdbfe" stroke-width="10"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#dbeafe">Graduation Frame</text>
+</svg>

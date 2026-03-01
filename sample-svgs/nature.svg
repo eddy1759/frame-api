@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#14532d"/>
+      <stop offset="100%" stop-color="#16a34a"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ecfccb" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#ecfccb" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#ecfccb" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#16a34a" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#16a34a" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <path d="M188 1702 C230 1624, 284 1622, 336 1702" fill="none" stroke="#bbf7d0" stroke-width="10"/>
+    <path d="M744 1702 C796 1622, 850 1624, 892 1702" fill="none" stroke="#bbf7d0" stroke-width="10"/>
+    <ellipse cx="252" cy="132" rx="34" ry="20" fill="#86efac" transform="rotate(-28 252 132)"/>
+    <ellipse cx="828" cy="132" rx="34" ry="20" fill="#86efac" transform="rotate(28 828 132)"/>
+    <circle cx="540" cy="1740" r="24" fill="#dcfce7" opacity="0.75"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#ecfccb">Nature Frame</text>
+</svg>

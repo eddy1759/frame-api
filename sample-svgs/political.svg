@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+  <defs>
+    <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0b132b"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fbbf24" stop-opacity="0.9"/>
+      <stop offset="100%" stop-color="#fbbf24" stop-opacity="0.25"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Frame ring with transparent center cutout for user photo placement -->
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
+
+  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
+  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#fbbf24" stroke-opacity="0.75" stroke-width="12"/>
+
+  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#1d4ed8" opacity="0.42"/>
+  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#1d4ed8" opacity="0.42"/>
+
+  <g opacity="0.96">
+    <rect x="180" y="86" width="720" height="44" rx="10" fill="#f8fafc" opacity="0.28"/>
+    <rect x="180" y="142" width="720" height="28" rx="10" fill="#f8fafc" opacity="0.18"/>
+    <circle cx="230" cy="1760" r="20" fill="#ef4444"/>
+    <circle cx="300" cy="1760" r="20" fill="#f59e0b"/>
+    <circle cx="370" cy="1760" r="20" fill="#3b82f6"/>
+    <circle cx="710" cy="1760" r="20" fill="#3b82f6"/>
+    <circle cx="780" cy="1760" r="20" fill="#f59e0b"/>
+    <circle cx="850" cy="1760" r="20" fill="#ef4444"/>
+  </g>
+
+  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#fbbf24">Political Frame</text>
+</svg>
