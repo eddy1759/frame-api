@@ -29,7 +29,7 @@ import { CreateFrameDto } from '../dto/create-frame.dto';
 import { UpdateFrameDto } from '../dto/update-frame.dto';
 import { FrameAssetsService } from '../services/frame-assets.service';
 import { FramesService } from '../services/frames.service';
-import { AdminGuard } from '../guards/admin.guard';
+import { AdminGuard } from '../../auth/guards/admin.guard';
 
 @ApiTags('Frames Admin')
 @ApiBearerAuth('JWT-auth')

@@ -17,7 +17,7 @@ export class AdminGuard implements CanActivate {
     if (!user || user.role !== UserRole.ADMIN) {
       throw new ForbiddenException({
         code: 'AUTH_INSUFFICIENT_ROLE',
-        message: 'Admin privileges are required for this endpoint.',
+        message: "You don't have permission to access this resource",
       });
     }
 

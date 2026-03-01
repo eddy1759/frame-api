@@ -27,7 +27,8 @@ import {
   TagsService,
 } from './services';
 import { FramesSyncCron } from './cron/frames-sync.cron';
-import { AdminGuard, OptionalJwtGuard, PremiumFrameGuard } from './guards';
+import { PremiumFrameGuard } from './guards';
+import { AdminGuard, OptionalJwtGuard } from '../auth/guards';
 
 @Module({
   imports: [

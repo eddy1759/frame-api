@@ -22,7 +22,7 @@ import { AuthThrottleGuard } from '../../auth/guards/custom-throttle.guard';
 import { CategoriesService } from '../services/categories.service';
 import { CreateCategoryDto } from '../dto/create-category.dto';
 import { UpdateCategoryDto } from '../dto/update-category.dto';
-import { AdminGuard } from '../guards/admin.guard';
+import { AdminGuard } from '../../auth/guards/admin.guard';
 
 @ApiTags('Frames Admin Categories')
 @ApiBearerAuth('JWT-auth')

@@ -22,7 +22,7 @@ import { AuthThrottleGuard } from '../../auth/guards/custom-throttle.guard';
 import { TagsService } from '../services/tags.service';
 import { CreateTagDto } from '../dto/create-tag.dto';
 import { UpdateTagDto } from '../dto/update-tag.dto';
-import { AdminGuard } from '../guards/admin.guard';
+import { AdminGuard } from '../../auth/guards/admin.guard';
 
 @ApiTags('Frames Admin Tags')
 @ApiBearerAuth('JWT-auth')

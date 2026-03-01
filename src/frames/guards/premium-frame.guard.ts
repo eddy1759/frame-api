@@ -12,6 +12,7 @@ import { Request } from 'express';
 import { Repository } from 'typeorm';
 import { Frame } from '../entities/frame.entity';
 import { JwtPayload } from '../../auth/interfaces/jwt-payload.interface';
+import { UserRole } from '../../auth/enums/user-role.enum';
 
 @Injectable()
 export class PremiumFrameGuard implements CanActivate {
@@ -60,6 +61,10 @@ export class PremiumFrameGuard implements CanActivate {
         code: 'AUTH_INVALID_TOKEN',
         message: 'Authentication token is missing or invalid.',
       });
+    }
+
+    if (payload.role === UserRole.ADMIN) {
+      return true;
     }
 
     if (!payload.subscriptionActive) {

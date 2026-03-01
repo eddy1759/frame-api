@@ -28,7 +28,7 @@ import {
 } from '../dto/query-frames.dto';
 import { QueryTagsDto } from '../dto/query-taxonomy.dto';
 import { FramesService } from '../services/frames.service';
-import { OptionalJwtGuard } from '../guards/optional-jwt.guard';
+import { OptionalJwtGuard } from '../../auth/guards/optional-jwt.guard';
 import { PremiumFrameGuard } from '../guards/premium-frame.guard';
 
 @ApiTags('Frames')
@@ -112,9 +112,15 @@ export class FramesController {
   @Public()
   @UseGuards(PremiumFrameGuard)
   @Get(':id([0-9a-fA-F-]{36})/svg')
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get frame SVG CDN URL' })
   @ApiParam({ name: 'id', description: 'Frame ID' })
   @ApiResponse({ status: 200, description: 'SVG URL returned' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized for premium frame access',
+  })
+  @ApiResponse({ status: 403, description: 'Premium subscription required' })
   async svg(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
     return this.framesService.getFrameSvgUrl(id);
   }
