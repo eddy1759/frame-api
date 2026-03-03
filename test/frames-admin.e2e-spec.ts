@@ -20,7 +20,7 @@ import { FramesService } from '../src/frames/services/frames.service';
 import { FrameAssetsService } from '../src/frames/services/frame-assets.service';
 import { CategoriesService } from '../src/frames/services/categories.service';
 import { TagsService } from '../src/frames/services/tags.service';
-import { AdminGuard } from '../src/frames/guards/admin.guard';
+import { AdminGuard } from '../src/auth/guards/admin.guard';
 import { AuthThrottleGuard } from '../src/auth/guards/custom-throttle.guard';
 import { GlobalExceptionFilter } from '../src/common/filters/http-exception.filter';
 import { TransformInterceptor } from '../src/common/interceptors/transform.interceptor';

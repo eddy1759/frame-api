@@ -129,7 +129,7 @@ export class FramesController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Record frame apply event' })
   @ApiParam({ name: 'id', description: 'Frame ID' })
-  @ApiResponse({ status: 200, description: 'Apply recorded' })
+  @ApiResponse({ status: 201, description: 'Apply recorded' })
   async apply(
     @Param('id', ParseUUIDPipe) id: string,
     @Req() req: Request,
@@ -146,7 +146,7 @@ export class FramesController {
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Save frame to user collection' })
   @ApiParam({ name: 'id', description: 'Frame ID' })
-  @ApiResponse({ status: 200, description: 'Frame saved' })
+  @ApiResponse({ status: 201, description: 'Frame saved' })
   async save(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User,

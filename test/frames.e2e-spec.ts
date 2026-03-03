@@ -18,7 +18,7 @@ import { Request } from 'express';
 import { FramesController } from '../src/frames/controllers/frames.controller';
 import { CategoriesController } from '../src/frames/controllers/categories.controller';
 import { FramesService } from '../src/frames/services/frames.service';
-import { OptionalJwtGuard } from '../src/frames/guards/optional-jwt.guard';
+import { OptionalJwtGuard } from '../src/auth/guards/optional-jwt.guard';
 import { PremiumFrameGuard } from '../src/frames/guards/premium-frame.guard';
 import { AuthThrottleGuard } from '../src/auth/guards/custom-throttle.guard';
 import { IS_PUBLIC_KEY } from '../src/auth/decorators/public.decorator';
