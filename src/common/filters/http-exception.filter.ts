@@ -77,6 +77,8 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       403: 'FORBIDDEN',
       404: 'NOT_FOUND',
       409: 'CONFLICT',
+      410: 'GONE',
+      422: 'UNPROCESSABLE_ENTITY',
       429: 'RATE_LIMIT_EXCEEDED',
       500: 'INTERNAL_ERROR',
       502: 'BAD_GATEWAY',

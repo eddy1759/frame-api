@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     ports:
       - '6382:6379'
-    command: redis-server --appendonly yes --requirepass frame_redis_password_dev
+    command: redis-server --appendonly yes --requirepass frame_redis_password_dev --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -57,8 +57,18 @@ services:
       /bin/sh -c "
       sleep 5 &&
       mc alias set local http://minio:9000 minioadmin minioadmin &&
-      mc mb -p local/frame-assets || true &&
-      mc anonymous set download local/frame-assets
+
+      # Create buckets
+      mc mb local/frame-assets --ignore-existing &&
+
+      # Public access
+      mc anonymous set download local/frame-assets/frames &&
+      mc anonymous set download local/frame-assets/images/ &&
+
+      # Lifecycle rule for temp uploads
+      mc ilm rule add local/frame-images-dev --prefix 'tmp/' --expire-days 1 || true &&
+
+      echo 'MinIO buckets and lifecycle configured'
       "
 
 volumes:

@@ -96,4 +96,64 @@ export class CacheService {
       return [];
     }
   }
+
+  async incrBy(key: string, amount: number): Promise<number | null> {
+    try {
+      return await this.redisService.incrBy(key, amount);
+    } catch (error) {
+      this.logger.warn(
+        `Cache incrBy failed for key=${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return 0;
+    }
+  }
+
+  async decrBy(key: string, amount: number): Promise<number | null> {
+    try {
+      return await this.redisService.decrBy(key, amount);
+    } catch (error) {
+      this.logger.warn(
+        `Cache decrBy failed for key=${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return 0;
+    }
+  }
+
+  async getTtl(key: string): Promise<number> {
+    try {
+      return await this.redisService.getTtl(key);
+    } catch (error) {
+      this.logger.warn(
+        `Cache getTtl failed for key=${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return -1;
+    }
+  }
+
+  async getNumber(key: string): Promise<number> {
+    try {
+      const value = await this.redisService.get(key);
+      if (!value) {
+        return 0;
+      }
+      return Number(value);
+    } catch (error) {
+      this.logger.warn(
+        `Cache getNumber failed for key=${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+      return 0;
+    }
+  }
+
+  async increment(key: string, ttlSeconds?: number): Promise<number> {
+    try {
+      const value = await this.redisService.increment(key, ttlSeconds);
+      return value;
+    } catch (error) {
+      this.logger.warn(
+        `Cache increment failed for key ${key}: ${error.message}`,
+      );
+      return 0;
+    }
+  }
 }

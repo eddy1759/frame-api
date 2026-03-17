@@ -1,0 +1,30 @@
+export const IMAGE_PROCESSING_QUEUE = 'image-processing';
+export const IMAGE_CLEANUP_QUEUE = 'image-cleanup';
+
+export enum ImageProcessingJobType {
+  PROCESS_IMAGE = 'process-image',
+  REPROCESS_IMAGE = 'reprocess-image',
+}
+
+export enum ImageCleanupJobType {
+  EXPIRE_SESSIONS = 'expire-sessions',
+  HARD_DELETE = 'hard-delete',
+  RECONCILE_QUOTA = 'reconcile-quota',
+}
+
+export interface ImageProcessingJobData {
+  imageId: string;
+  userId: string;
+  storageKey: string;
+  mimeType: string;
+  is360: boolean;
+  requestedAt: string;
+}
+
+export interface ImageCleanupJobData {
+  type: 'expired_session' | 'hard_delete' | 'reconcile_quota';
+  uploadSessionId?: string;
+  imageId?: string;
+  userId?: string;
+  storageKeys?: string[];
+}

@@ -22,6 +22,8 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { SharedModule } from './common/shared.module';
 import { FramesModule } from './frames/frames.module';
+import { QueueModule } from './common/queue/queue.module';
+import { ImagesModule } from './images/images.module';
 
 @Module({
   imports: [
@@ -76,6 +78,8 @@ import { FramesModule } from './frames/frames.module';
     HealthModule,
     AuthModule,
     FramesModule,
+    QueueModule,
+    ImagesModule,
   ],
   controllers: [],
   providers: [AppService],

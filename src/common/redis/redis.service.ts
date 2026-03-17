@@ -45,6 +45,14 @@ export class RedisService {
     await this.redis.expire(key, ttlSeconds);
   }
 
+  async incrBy(key: string, amount: number): Promise<number> {
+    return this.redis.incrby(key, amount);
+  }
+
+  async decrBy(key: string, amount: number): Promise<number> {
+    return this.redis.decrby(key, amount);
+  }
+
   async zIncrBy(
     key: string,
     increment: number,
@@ -105,6 +113,30 @@ export class RedisService {
     }
 
     await pipeline.exec();
+  }
+
+  async getTtl(key: string): Promise<number> {
+    try {
+      return await this.redis.ttl(key);
+    } catch (error) {
+      this.logger.warn(`Cache getTtl failed for key ${key}: ${error.message}`);
+      return -1;
+    }
+  }
+
+  async increment(key: string, ttlSeconds?: number): Promise<number> {
+    try {
+      const newValue = await this.redis.incr(key);
+      if (ttlSeconds && newValue === 1) {
+        await this.redis.expire(key, ttlSeconds);
+      }
+      return newValue;
+    } catch (error) {
+      this.logger.warn(
+        `Cache increment failed for key ${key}: ${error.message}`,
+      );
+      return 0;
+    }
   }
 
   /**
