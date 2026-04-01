@@ -1,30 +1,22 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" width="1920" height="1080">
   <defs>
     <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#1e3a8a"/>
-      <stop offset="100%" stop-color="#2563eb"/>
+      <stop offset="0%" stop-color="#1e293b" />
+      <stop offset="100%" stop-color="#0f172a" />
     </linearGradient>
     <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#dbeafe" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#dbeafe" stop-opacity="0.25"/>
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0.25" />
     </linearGradient>
   </defs>
-
-  <!-- Frame ring with transparent center cutout for user photo placement -->
-  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
-
-  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
-  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#dbeafe" stroke-opacity="0.75" stroke-width="12"/>
-
-  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#2563eb" opacity="0.42"/>
-  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#2563eb" opacity="0.42"/>
-
-  <g opacity="0.96">
-    <polygon points="540,74 700,144 540,214 380,144" fill="#93c5fd" opacity="0.7"/>
-    <rect x="518" y="214" width="44" height="30" rx="8" fill="#93c5fd"/>
-    <path d="M250 1738 C330 1684, 410 1684, 490 1738" fill="none" stroke="#bfdbfe" stroke-width="10"/>
-    <path d="M590 1738 C670 1684, 750 1684, 830 1738" fill="none" stroke="#bfdbfe" stroke-width="10"/>
-  </g>
-
-  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#dbeafe">Graduation Frame</text>
+  <path d="M0 0H1920V1080H0Z M240 120H1680V960H240Z" fill="url(#frameFill)" fill-rule="evenodd" />
+  <rect x="30" y="30" width="1860" height="1020" rx="49" fill="none" stroke="url(#edgeGlow)" stroke-width="13" />
+  <rect x="240" y="120" width="1440" height="840" rx="29" fill="none" stroke="#f59e0b" stroke-opacity="0.75" stroke-width="9" />
+  <rect x="46" y="196" width="52" height="689" rx="26" fill="#334155" opacity="0.4" />
+  <rect x="1822" y="196" width="52" height="689" rx="26" fill="#334155" opacity="0.4" />
+  <circle cx="461" cy="108" r="28" fill="#f8fafc" opacity="0.72" />
+  <circle cx="960" cy="99" r="36" fill="#f59e0b" opacity="0.56" />
+  <circle cx="1459" cy="108" r="28" fill="#f8fafc" opacity="0.72" />
+  <line x1="461" y1="950" x2="1459" y2="950" stroke="#f8fafc" stroke-width="8" stroke-linecap="round" opacity="0.55" />
+  <line x1="576" y1="982" x2="1344" y2="982" stroke="#f59e0b" stroke-width="5" stroke-linecap="round" opacity="0.5" />
 </svg>

@@ -1,31 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" width="1080" height="1920">
   <defs>
     <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#111827"/>
-      <stop offset="100%" stop-color="#334155"/>
+      <stop offset="0%" stop-color="#f8fafc" />
+      <stop offset="100%" stop-color="#f59e0b" />
     </linearGradient>
     <linearGradient id="edgeGlow" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#f8fafc" stop-opacity="0.9"/>
-      <stop offset="100%" stop-color="#f8fafc" stop-opacity="0.25"/>
+      <stop offset="0%" stop-color="#b45309" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#b45309" stop-opacity="0.25" />
     </linearGradient>
   </defs>
-
-  <!-- Frame ring with transparent center cutout for user photo placement -->
-  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd"/>
-
-  <rect x="28" y="28" width="1024" height="1864" rx="64" fill="none" stroke="url(#edgeGlow)" stroke-width="18"/>
-  <rect x="140" y="260" width="800" height="1400" rx="36" fill="none" stroke="#f8fafc" stroke-opacity="0.75" stroke-width="12"/>
-
-  <rect x="48" y="300" width="52" height="1320" rx="18" fill="#334155" opacity="0.42"/>
-  <rect x="980" y="300" width="52" height="1320" rx="18" fill="#334155" opacity="0.42"/>
-
-  <g opacity="0.96">
-    <circle cx="540" cy="150" r="72" fill="none" stroke="#e2e8f0" stroke-width="8"/>
-    <circle cx="540" cy="150" r="42" fill="none" stroke="#cbd5e1" stroke-width="6"/>
-    <path d="M540 76 L540 224 M466 150 L614 150" stroke="#f1f5f9" stroke-width="7" stroke-linecap="round"/>
-    <rect x="490" y="1716" width="100" height="78" rx="18" fill="#cbd5e1" opacity="0.22"/>
-    <path d="M480 1788 L600 1788" stroke="#f1f5f9" stroke-width="8" stroke-linecap="round"/>
-  </g>
-
-  <text x="540" y="1852" text-anchor="middle" font-size="48" font-family="Verdana" fill="#f8fafc">Religion Frame</text>
+  <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd" />
+  <rect x="30" y="30" width="1020" height="1860" rx="49" fill="none" stroke="url(#edgeGlow)" stroke-width="13" />
+  <rect x="140" y="260" width="800" height="1400" rx="29" fill="none" stroke="#b45309" stroke-opacity="0.75" stroke-width="9" />
+  <rect x="46" y="302" width="52" height="1316" rx="26" fill="#d97706" opacity="0.4" />
+  <rect x="982" y="302" width="52" height="1316" rx="26" fill="#d97706" opacity="0.4" />
+  <circle cx="259" cy="108" r="28" fill="#fde68a" opacity="0.72" />
+  <circle cx="540" cy="99" r="36" fill="#b45309" opacity="0.56" />
+  <circle cx="821" cy="108" r="28" fill="#fde68a" opacity="0.72" />
+  <line x1="259" y1="1790" x2="821" y2="1790" stroke="#fde68a" stroke-width="8" stroke-linecap="round" opacity="0.55" />
+  <line x1="324" y1="1822" x2="756" y2="1822" stroke="#b45309" stroke-width="5" stroke-linecap="round" opacity="0.5" />
 </svg>
