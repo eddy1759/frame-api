@@ -151,7 +151,7 @@ export class CacheService {
       return value;
     } catch (error) {
       this.logger.warn(
-        `Cache increment failed for key ${key}: ${error.message}`,
+        `Cache increment failed for key ${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
       );
       return 0;
     }

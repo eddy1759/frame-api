@@ -12,6 +12,11 @@ export interface PaginationResult {
   take: number;
 }
 
+export interface PaginatedResult<T> {
+  data: T[];
+  meta: PaginationMeta;
+}
+
 export interface PaginationMeta {
   pagination: {
     page: number;

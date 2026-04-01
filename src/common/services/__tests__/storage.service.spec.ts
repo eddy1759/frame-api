@@ -97,18 +97,22 @@ describe('StorageService', () => {
     );
   });
 
-  it('generates presigned urls', async () => {
+  it('generates presigned put urls', async () => {
     const { service } = createService();
     (getSignedUrl as jest.Mock).mockResolvedValueOnce(
       'https://signed.example/upload',
     );
 
-    const url = await service.generatePresignedUrl(
+    const result = await service.generatePresignedPutUrl(
       '/frames/frame-1/original.svg',
+      'image/svg+xml',
+      120,
       120,
     );
 
-    expect(url).toBe('https://signed.example/upload');
+    expect(result.url).toBe('https://signed.example/upload');
+    expect(result.key).toBe('frames/frame-1/original.svg');
+    expect(result.expiresAt).toBeInstanceOf(Date);
     expect(getSignedUrl).toHaveBeenCalledTimes(1);
   });
 });

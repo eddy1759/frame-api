@@ -212,8 +212,18 @@ export class StorageService implements StoragePort, OnModuleInit {
         etag: response.ETag,
         lastModified: response.LastModified,
       };
-    } catch (error: any) {
-      if (error?.$metadata?.httpStatusCode === 404) {
+    } catch (error: unknown) {
+      const httpStatusCode =
+        typeof error === 'object' &&
+        error !== null &&
+        '$metadata' in error &&
+        typeof (error as { $metadata?: { httpStatusCode?: number } })
+          .$metadata === 'object'
+          ? (error as { $metadata?: { httpStatusCode?: number } }).$metadata
+              ?.httpStatusCode
+          : undefined;
+
+      if (httpStatusCode === 404) {
         return null;
       }
 

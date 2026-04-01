@@ -24,6 +24,31 @@ export class RedisService {
     await this.redis.del(key);
   }
 
+  async setIfNotExists(
+    key: string,
+    value: string,
+    ttlSeconds: number,
+  ): Promise<boolean> {
+    const result = await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+    return result === 'OK';
+  }
+
+  async deleteIfValueMatches(key: string, value: string): Promise<boolean> {
+    const result = await this.redis.eval(
+      `
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+          return redis.call("del", KEYS[1])
+        end
+        return 0
+      `,
+      1,
+      key,
+      value,
+    );
+
+    return Number(result) === 1;
+  }
+
   async exists(key: string): Promise<boolean> {
     const result = await this.redis.exists(key);
     return result === 1;
@@ -101,25 +126,36 @@ export class RedisService {
   }
 
   async deleteByPattern(pattern: string): Promise<void> {
-    const keys = await this.redis.keys(pattern);
-    if (keys.length === 0) {
-      return;
-    }
+    let cursor = '0';
 
-    const pipeline = this.redis.pipeline();
-    for (const key of keys) {
-      const strippedKey = key.replace(/^frame:/, '');
-      pipeline.del(strippedKey);
-    }
+    do {
+      const [nextCursor, keys] = await this.redis.scan(
+        cursor,
+        'MATCH',
+        pattern,
+        'COUNT',
+        '100',
+      );
 
-    await pipeline.exec();
+      if (keys.length > 0) {
+        const pipeline = this.redis.pipeline();
+        for (const key of keys) {
+          pipeline.del(key);
+        }
+        await pipeline.exec();
+      }
+
+      cursor = nextCursor;
+    } while (cursor !== '0');
   }
 
   async getTtl(key: string): Promise<number> {
     try {
       return await this.redis.ttl(key);
     } catch (error) {
-      this.logger.warn(`Cache getTtl failed for key ${key}: ${error.message}`);
+      this.logger.warn(
+        `Cache getTtl failed for key ${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
       return -1;
     }
   }
@@ -133,7 +169,7 @@ export class RedisService {
       return newValue;
     } catch (error) {
       this.logger.warn(
-        `Cache increment failed for key ${key}: ${error.message}`,
+        `Cache increment failed for key ${key}: ${error instanceof Error ? error.message : 'unknown error'}`,
       );
       return 0;
     }
