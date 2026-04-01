@@ -20,8 +20,15 @@ export enum VariantType {
   PANORAMIC_PREVIEW = 'panoramic_preview',
 }
 
+export enum FrameRenderStatus {
+  NONE = 'none',
+  READY = 'ready',
+  PENDING_REPROCESS = 'pending_reprocess',
+}
+
 export enum UploadSessionStatus {
   PENDING = 'pending',
+  COMPLETING = 'completing',
   UPLOADING = 'uploading',
   COMPLETED = 'completed',
   FAILED = 'failed',

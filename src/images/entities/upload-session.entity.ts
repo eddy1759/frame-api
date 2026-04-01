@@ -19,7 +19,7 @@ export class UploadSession {
   userId: string;
 
   @Column({ name: 'frame_id', type: 'uuid', nullable: true })
-  frameId: string;
+  frameId: string | null;
 
   @Column({ name: 'original_filename', type: 'varchar', length: 255 })
   originalFilename: string;
@@ -33,7 +33,7 @@ export class UploadSession {
   @Column({ name: 'storage_key', type: 'varchar', length: 512, unique: true })
   storageKey: string;
 
-  @Column({ type: 'text' })
+  @Column({ name: 'presigned_url', type: 'text' })
   presignedUrl: string;
 
   @Column({
@@ -51,16 +51,16 @@ export class UploadSession {
   expiresAt: Date;
 
   @Column({ name: 'completed_at', type: 'timestamptz', nullable: true })
-  completedAt: Date;
+  completedAt: Date | null;
 
   @Column({ name: 'ip_address', type: 'varchar', length: 45, nullable: true })
-  ipAddress: string;
+  ipAddress: string | null;
 
   @Column({ name: 'user_agent', type: 'varchar', length: 500, nullable: true })
-  userAgent: string;
+  userAgent: string | null;
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
-  errorMessage: string;
+  errorMessage: string | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

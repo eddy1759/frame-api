@@ -1,7 +1,7 @@
-import { Injectable, Logger, ForbiddenException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { CacheService } from '../../common/services/cache.service';
+import { EntityManager, Repository } from 'typeorm';
 import { UserStorageQuota } from '../entities/user-storage-quota.entity';
 import { StorageTier } from '../types/image.types';
 
@@ -12,21 +12,35 @@ export class StorageQuotaService {
   constructor(
     @InjectRepository(UserStorageQuota)
     private readonly quotaRepository: Repository<UserStorageQuota>,
-    private readonly cacheService: CacheService,
+    private readonly configService: ConfigService,
   ) {}
 
-  async getOrCreateQuota(userId: string): Promise<UserStorageQuota> {
-    let quota = await this.quotaRepository.findOne({ where: { userId } });
+  async getOrCreateQuota(
+    userId: string,
+    manager?: EntityManager,
+  ): Promise<UserStorageQuota> {
+    const repo = this.getRepository(manager);
+    let quota = await repo.findOne({ where: { userId } });
 
     if (!quota) {
-      quota = this.quotaRepository.create({
+      quota = repo.create({
         userId,
         tierName: StorageTier.FREE,
-        limitBytes: 5368709120, // 5GB
+        limitBytes: this.defaultStorageLimit,
         usedBytes: 0,
+        pendingBytes: 0,
         imageCount: 0,
       });
-      quota = await this.quotaRepository.save(quota);
+
+      try {
+        quota = await repo.save(quota);
+      } catch {
+        const existing = await repo.findOne({ where: { userId } });
+        if (!existing) {
+          throw new Error(`Failed to initialize quota for user ${userId}`);
+        }
+        quota = existing;
+      }
     }
 
     return quota;
@@ -35,120 +49,190 @@ export class StorageQuotaService {
   async checkQuotaAvailability(
     userId: string,
     requiredBytes: number,
+    manager?: EntityManager,
   ): Promise<void> {
-    const used = await this.getUsedBytes(userId);
-    const pending = await this.getPendingBytes(userId);
-    const quota = await this.getOrCreateQuota(userId);
+    if (requiredBytes <= 0) {
+      throw new Error('requiredBytes must be greater than zero');
+    }
 
-    const totalRequired = Number(used) + Number(pending) + requiredBytes;
+    const quota = manager
+      ? await this.getQuotaForUpdate(userId, manager)
+      : await this.getOrCreateQuota(userId);
 
-    if (totalRequired > Number(quota.limitBytes)) {
-      throw new ForbiddenException(
-        'STORAGE_QUOTA_EXCEEDED',
-        `Storage quota exceeded. Used: ${used}, Pending: ${pending}, Required: ${requiredBytes}, Limit: ${quota.limitBytes}`,
-      );
+    const usedBytes = Number(quota.usedBytes);
+    const pendingBytes = Number(quota.pendingBytes);
+    const limitBytes = Number(quota.limitBytes);
+
+    if (usedBytes + pendingBytes + requiredBytes > limitBytes) {
+      throw new ForbiddenException({
+        code: 'STORAGE_QUOTA_EXCEEDED',
+        message: 'Storage quota exceeded for this upload request.',
+      });
     }
   }
 
-  async reservePending(userId: string, bytes: number): Promise<void> {
-    const key = `quota:${userId}:pending`;
-    await this.cacheService.incrBy(key, bytes);
+  async reservePending(
+    userId: string,
+    bytes: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (bytes <= 0) {
+      return;
+    }
+
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.reservePending(userId, bytes, txManager);
+      });
+      return;
+    }
+
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+    const nextPending = Number(quota.pendingBytes) + bytes;
+
+    if (Number(quota.usedBytes) + nextPending > Number(quota.limitBytes)) {
+      throw new ForbiddenException({
+        code: 'STORAGE_QUOTA_EXCEEDED',
+        message: 'Storage quota exceeded for this upload request.',
+      });
+    }
+
+    quota.pendingBytes = nextPending;
+    await repo.save(quota);
   }
 
-  async releasePending(userId: string, bytes: number): Promise<void> {
-    const key = `quota:${userId}:pending`;
-    const current = await this.cacheService.getNumber(key);
-    const newValue = Math.max(0, current - bytes);
-    await this.cacheService.set(key, newValue);
+  async releasePending(
+    userId: string,
+    bytes: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (bytes <= 0) {
+      return;
+    }
+
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.releasePending(userId, bytes, txManager);
+      });
+      return;
+    }
+
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+
+    quota.pendingBytes = Math.max(0, Number(quota.pendingBytes) - bytes);
+    await repo.save(quota);
   }
 
   async confirmUsage(
     userId: string,
     actualBytes: number,
-    pendingBytes: number,
+    reservedBytes: number,
+    manager?: EntityManager,
   ): Promise<void> {
     if (actualBytes <= 0) {
       throw new Error('actualBytes must be greater than zero');
     }
 
-    if (pendingBytes < 0) {
-      throw new Error('pendingBytes cannot be negative');
+    if (reservedBytes < 0) {
+      throw new Error('reservedBytes cannot be negative');
     }
 
-    // Update database first (source of truth)
-    await this.quotaRepository
-      .createQueryBuilder()
-      .update(UserStorageQuota)
-      .set({
-        usedBytes: () => `"usedBytes" + :actualBytes`,
-        imageCount: () => `"imageCount" + 1`,
-      })
-      .where('user_id = :userId', { userId })
-      .setParameters({ actualBytes })
-      .execute();
-
-    // Release reserved quota
-    await this.releasePending(userId, pendingBytes);
-
-    // Update Redis usage counter
-    const usedKey = `quota:${userId}:used`;
-
-    try {
-      await this.cacheService.incrBy(usedKey, actualBytes);
-    } catch (error) {
-      this.logger.warn(
-        `Redis quota update failed for user ${userId}: ${error.message}`,
-      );
-    }
-  }
-
-  async addVariantUsage(userId: string, variantBytes: number): Promise<void> {
-    const usedKey = `quota:${userId}:used`;
-    await this.cacheService.incrBy(usedKey, variantBytes);
-
-    await this.quotaRepository
-      .createQueryBuilder()
-      .update(UserStorageQuota)
-      .set({
-        usedBytes: () => `"usedBytes" + ${variantBytes}`,
-      })
-      .where('user_id = :userId', { userId })
-      .execute();
-  }
-
-  async reclaimUsage(userId: string, bytes: number): Promise<void> {
-    const usedKey = `quota:${userId}:used`;
-    const current = await this.getUsedBytes(userId);
-    const newUsed = Math.max(0, Number(current) - bytes);
-    await this.cacheService.set(usedKey, newUsed, 600);
-
-    await this.quotaRepository
-      .createQueryBuilder()
-      .update(UserStorageQuota)
-      .set({
-        usedBytes: () => `GREATEST("usedBytes" - ${bytes}, 0)`,
-        imageCount: () => 'GREATEST("imageCount" - 1, 0)',
-      })
-      .where('user_id = :userId', { userId })
-      .execute();
-  }
-
-  async getUsedBytes(userId: string): Promise<number> {
-    const key = `quota:${userId}:used`;
-    const cached = await this.cacheService.getNumber(key);
-
-    if (cached > 0) {
-      return cached;
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.confirmUsage(userId, actualBytes, reservedBytes, txManager);
+      });
+      return;
     }
 
-    const quota = await this.getOrCreateQuota(userId);
-    await this.cacheService.set(key, Number(quota.usedBytes), 600);
-    return Number(quota.usedBytes);
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+    const nextPending = Math.max(0, Number(quota.pendingBytes) - reservedBytes);
+    const nextUsed = Number(quota.usedBytes) + actualBytes;
+
+    if (nextUsed + nextPending > Number(quota.limitBytes)) {
+      throw new ForbiddenException({
+        code: 'STORAGE_QUOTA_EXCEEDED',
+        message: 'Storage quota exceeded after validating the uploaded file.',
+      });
+    }
+
+    quota.pendingBytes = nextPending;
+    quota.usedBytes = nextUsed;
+    quota.imageCount = Number(quota.imageCount) + 1;
+
+    await repo.save(quota);
   }
 
-  async getPendingBytes(userId: string): Promise<number> {
-    const key = `quota:${userId}:pending`;
-    return this.cacheService.getNumber(key);
+  async addVariantUsage(
+    userId: string,
+    variantBytes: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (variantBytes <= 0) {
+      return;
+    }
+
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.addVariantUsage(userId, variantBytes, txManager);
+      });
+      return;
+    }
+
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+
+    quota.usedBytes = Number(quota.usedBytes) + variantBytes;
+    await repo.save(quota);
+  }
+
+  async reclaimUsage(
+    userId: string,
+    bytes: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (bytes <= 0) {
+      return;
+    }
+
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.reclaimUsage(userId, bytes, txManager);
+      });
+      return;
+    }
+
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+
+    quota.usedBytes = Math.max(0, Number(quota.usedBytes) - bytes);
+    quota.imageCount = Math.max(0, Number(quota.imageCount) - 1);
+    await repo.save(quota);
+  }
+
+  async reclaimVariantUsage(
+    userId: string,
+    bytes: number,
+    manager?: EntityManager,
+  ): Promise<void> {
+    if (bytes <= 0) {
+      return;
+    }
+
+    if (!manager) {
+      await this.quotaRepository.manager.transaction(async (txManager) => {
+        await this.reclaimVariantUsage(userId, bytes, txManager);
+      });
+      return;
+    }
+
+    const repo = this.getRepository(manager);
+    const quota = await this.getQuotaForUpdate(userId, manager);
+
+    quota.usedBytes = Math.max(0, Number(quota.usedBytes) - bytes);
+    await repo.save(quota);
   }
 
   async getQuotaSummary(userId: string): Promise<{
@@ -162,26 +246,21 @@ export class StorageQuotaService {
     upgradeRequired: boolean;
   }> {
     const quota = await this.getOrCreateQuota(userId);
-    const usedBytes = await this.getUsedBytes(userId);
-    const pendingBytes = await this.getPendingBytes(userId);
     const limitBytes = Number(quota.limitBytes);
-    const availableBytes = Math.max(
-      0,
-      limitBytes - Number(usedBytes) - pendingBytes,
-    );
+    const usedBytes = Number(quota.usedBytes);
+    const pendingBytes = Number(quota.pendingBytes);
+    const availableBytes = Math.max(0, limitBytes - usedBytes - pendingBytes);
     const usedPercent =
-      limitBytes > 0
-        ? Math.round((Number(usedBytes) / limitBytes) * 10000) / 100
-        : 0;
+      limitBytes > 0 ? Math.round((usedBytes / limitBytes) * 10000) / 100 : 0;
 
     return {
       tierName: quota.tierName,
       limitBytes,
-      usedBytes: Number(usedBytes),
+      usedBytes,
       pendingBytes,
       availableBytes,
       usedPercent,
-      imageCount: quota.imageCount,
+      imageCount: Number(quota.imageCount),
       upgradeRequired: availableBytes <= 0,
     };
   }
@@ -193,14 +272,63 @@ export class StorageQuotaService {
   ): Promise<void> {
     await this.quotaRepository.update(
       { userId },
-      { usedBytes: actualUsedBytes, imageCount: actualImageCount },
+      {
+        usedBytes: actualUsedBytes,
+        imageCount: actualImageCount,
+      },
     );
-
-    const usedKey = `quota:${userId}:used`;
-    await this.cacheService.set(usedKey, actualUsedBytes, 600);
 
     this.logger.log(
       `Quota reconciled for user ${userId}: ${actualUsedBytes} bytes, ${actualImageCount} images`,
     );
+  }
+
+  private get defaultStorageLimit(): number {
+    return this.configService.get<number>(
+      'image.defaultStorageLimit',
+      5368709120,
+    );
+  }
+
+  private getRepository(manager?: EntityManager): Repository<UserStorageQuota> {
+    return manager
+      ? manager.getRepository(UserStorageQuota)
+      : this.quotaRepository;
+  }
+
+  private async getQuotaForUpdate(
+    userId: string,
+    manager: EntityManager,
+  ): Promise<UserStorageQuota> {
+    const repo = this.getRepository(manager);
+    let quota = await repo
+      .createQueryBuilder('quota')
+      .setLock('pessimistic_write')
+      .where('quota.userId = :userId', { userId })
+      .getOne();
+
+    if (!quota) {
+      quota = repo.create({
+        userId,
+        tierName: StorageTier.FREE,
+        limitBytes: this.defaultStorageLimit,
+        usedBytes: 0,
+        pendingBytes: 0,
+        imageCount: 0,
+      });
+      await repo.save(quota);
+
+      quota = await repo
+        .createQueryBuilder('quota')
+        .setLock('pessimistic_write')
+        .where('quota.userId = :userId', { userId })
+        .getOne();
+    }
+
+    if (!quota) {
+      throw new Error(`Quota row not found for user ${userId}`);
+    }
+
+    return quota;
   }
 }

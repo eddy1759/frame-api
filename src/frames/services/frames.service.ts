@@ -1,7 +1,9 @@
 ﻿import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
+  Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository, SelectQueryBuilder } from 'typeorm';
@@ -18,10 +20,18 @@ import {
   CacheService,
   PaginationService,
   SlugService,
+  STORAGE_PORT,
+  StoragePort,
 } from '../../common/services';
+import { User } from '../../auth/entities/user.entity';
+import { UserRole } from '../../auth/enums/user-role.enum';
 import { FramesCacheService } from './frames-cache.service';
 import { CategoriesService } from './categories.service';
 import { TagsService } from './tags.service';
+import {
+  FrameMetadata,
+  normalizeFrameMetadata,
+} from '../utils/frame-metadata.util';
 
 export interface FrameListItem {
   id: string;
@@ -43,8 +53,9 @@ export interface FrameDetailItem extends FrameListItem {
   height: number;
   aspectRatio: string;
   orientation: string;
-  metadata: Record<string, unknown>;
+  metadata: FrameMetadata;
   svgUrl: string | null;
+  editorPreviewUrl: string | null;
   viewCount: number;
   assets: Array<{
     type: string;
@@ -75,6 +86,8 @@ export class FramesService {
     private readonly framesCacheService: FramesCacheService,
     private readonly categoriesService: CategoriesService,
     private readonly tagsService: TagsService,
+    @Inject(STORAGE_PORT)
+    private readonly storageService: StoragePort,
   ) {}
 
   async createFrame(
@@ -103,7 +116,7 @@ export class FramesService {
       height: dto.height,
       aspectRatio: dto.aspectRatio,
       orientation: dto.orientation,
-      metadata: dto.metadata ?? {},
+      metadata: normalizeFrameMetadata(dto.metadata),
       isAiGenerated: dto.isAiGenerated ?? false,
       sortOrder: dto.sortOrder ?? 0,
       createdById,
@@ -164,7 +177,9 @@ export class FramesService {
     if (dto.height !== undefined) frame.height = dto.height;
     if (dto.aspectRatio !== undefined) frame.aspectRatio = dto.aspectRatio;
     if (dto.orientation !== undefined) frame.orientation = dto.orientation;
-    if (dto.metadata !== undefined) frame.metadata = dto.metadata;
+    if (dto.metadata !== undefined) {
+      frame.metadata = normalizeFrameMetadata(dto.metadata);
+    }
     if (dto.isAiGenerated !== undefined)
       frame.isAiGenerated = dto.isAiGenerated;
     if (dto.sortOrder !== undefined) frame.sortOrder = dto.sortOrder;
@@ -405,19 +420,53 @@ export class FramesService {
   }
 
   async getFrameSvgUrl(id: string): Promise<{ url: string }> {
-    const frame = await this.frameRepository.findOne({
-      where: { id, isActive: true },
-      select: ['id', 'svgUrl'],
-    });
+    const [frame, asset] = await Promise.all([
+      this.frameRepository.findOne({
+        where: { id, isActive: true },
+        select: ['id', 'svgUrl'],
+      }),
+      this.frameAssetRepository.findOne({
+        where: { frameId: id, type: FrameAssetType.SVG },
+      }),
+    ]);
 
-    if (!frame || !frame.svgUrl) {
+    if (!frame || (!asset && !frame.svgUrl)) {
       throw new NotFoundException({
         code: 'FRAME_NOT_FOUND',
         message: 'Frame asset is not available.',
       });
     }
 
-    return { url: frame.svgUrl };
+    return {
+      url: asset
+        ? await this.storageService.generatePresignedGetUrl(asset.storageKey)
+        : frame.svgUrl!,
+    };
+  }
+
+  async getFrameEditorPreviewUrl(id: string): Promise<{ url: string }> {
+    const [frame, asset] = await Promise.all([
+      this.frameRepository.findOne({
+        where: { id, isActive: true },
+        select: ['id', 'editorPreviewUrl'],
+      }),
+      this.frameAssetRepository.findOne({
+        where: { frameId: id, type: FrameAssetType.PREVIEW_PNG },
+      }),
+    ]);
+
+    if (!frame || (!asset && !frame.editorPreviewUrl)) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame preview asset is not available.',
+      });
+    }
+
+    return {
+      url: asset
+        ? await this.storageService.generatePresignedGetUrl(asset.storageKey)
+        : frame.editorPreviewUrl!,
+    };
   }
 
   async getPopular(
@@ -638,6 +687,37 @@ export class FramesService {
     }
   }
 
+  async assertFrameEligibleForImage(
+    frameId: string,
+    user?: Pick<User, 'role' | 'subscriptionActive'>,
+  ): Promise<{ id: string; isPremium: boolean }> {
+    const frame = await this.frameRepository.findOne({
+      where: { id: frameId, isActive: true },
+      select: ['id', 'isPremium'],
+    });
+
+    if (!frame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    const isAdmin = user?.role === UserRole.ADMIN;
+
+    if (frame.isPremium && !isAdmin && !user?.subscriptionActive) {
+      throw new ForbiddenException({
+        code: 'PREMIUM_SUBSCRIPTION_REQUIRED',
+        message: 'This frame requires an active premium subscription.',
+      });
+    }
+
+    return {
+      id: frame.id,
+      isPremium: frame.isPremium,
+    };
+  }
+
   private applyListFilters(
     qb: SelectQueryBuilder<Frame>,
     query: QueryFramesDto,
@@ -766,25 +846,33 @@ export class FramesService {
       aspectRatio: frame.aspectRatio,
       orientation: frame.orientation,
       metadata: frame.metadata,
-      svgUrl: frame.svgUrl,
+      svgUrl: frame.isPremium ? null : frame.svgUrl,
+      editorPreviewUrl: frame.isPremium ? null : frame.editorPreviewUrl,
       viewCount: frame.viewCount,
-      assets: (frame.assets ?? []).map((asset) => ({
-        type: asset.type,
-        url:
-          frame.svgUrl && asset.type === FrameAssetType.SVG
-            ? frame.svgUrl
-            : this.resolveAssetUrl(frame, asset),
-        mimeType: asset.mimeType,
-        width: asset.width,
-        height: asset.height,
-        fileSize: asset.fileSize,
-      })),
+      assets: (frame.assets ?? [])
+        .filter((asset) => this.shouldExposePublicAsset(frame, asset))
+        .map((asset) => ({
+          type: asset.type,
+          url: this.resolveAssetUrl(frame, asset),
+          mimeType: asset.mimeType,
+          width: asset.width,
+          height: asset.height,
+          fileSize: asset.fileSize,
+        })),
     };
   }
 
   private resolveAssetUrl(frame: Frame, asset: FrameAsset): string {
+    if (asset.type === FrameAssetType.PREVIEW_PNG && frame.editorPreviewUrl) {
+      return frame.editorPreviewUrl;
+    }
+
     if (asset.type === FrameAssetType.THUMBNAIL_MD && frame.thumbnailUrl) {
       return frame.thumbnailUrl;
+    }
+
+    if (asset.type === FrameAssetType.SVG && frame.svgUrl) {
+      return frame.svgUrl;
     }
 
     const base = frame.svgUrl ? frame.svgUrl.replace('/original.svg', '') : '';
@@ -793,6 +881,16 @@ export class FramesService {
     }
 
     return asset.storageKey;
+  }
+
+  private shouldExposePublicAsset(frame: Frame, asset: FrameAsset): boolean {
+    if (!frame.isPremium) {
+      return true;
+    }
+
+    return ![FrameAssetType.SVG, FrameAssetType.PREVIEW_PNG].includes(
+      asset.type,
+    );
   }
 
   private async getSavedFrameIdSet(

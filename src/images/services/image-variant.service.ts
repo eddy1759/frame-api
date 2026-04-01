@@ -26,8 +26,15 @@ export class ImageVariantService {
     quality?: number;
   }): Promise<ImageVariant> {
     const cdnUrl = this.storageService.getPublicUrl(data.storageKey);
+    const existing = await this.variantRepository.findOne({
+      where: {
+        imageId: data.imageId,
+        variantType: data.variantType,
+      },
+    });
 
     const variant = this.variantRepository.create({
+      ...(existing ?? {}),
       ...data,
       cdnUrl,
     });

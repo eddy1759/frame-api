@@ -125,6 +125,24 @@ export class FramesController {
     return this.framesService.getFrameSvgUrl(id);
   }
 
+  @Public()
+  @UseGuards(PremiumFrameGuard)
+  @Get(':id([0-9a-fA-F-]{36})/editor-preview')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Get frame editor preview PNG URL' })
+  @ApiParam({ name: 'id', description: 'Frame ID' })
+  @ApiResponse({ status: 200, description: 'Editor preview URL returned' })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized for premium frame preview access',
+  })
+  @ApiResponse({ status: 403, description: 'Premium subscription required' })
+  async editorPreview(
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<unknown> {
+    return this.framesService.getFrameEditorPreviewUrl(id);
+  }
+
   @Post(':id([0-9a-fA-F-]{36})/apply')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Record frame apply event' })

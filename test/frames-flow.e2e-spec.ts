@@ -42,6 +42,7 @@ const adminUser: User = {
   avatarUrl: null,
   status: UserStatus.ACTIVE,
   role: UserRole.ADMIN,
+  subscriptionActive: false,
   storageUsed: 0,
   storageLimit: 5368709120,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -74,6 +75,7 @@ type FlowFrame = {
   metadata: Record<string, unknown>;
   thumbnailUrl: string | null;
   svgUrl: string | null;
+  editorPreviewUrl: string | null;
   applyCount: number;
   isActive: boolean;
 };
@@ -103,6 +105,7 @@ const framesServiceMock = {
       metadata: (dto.metadata as Record<string, unknown> | undefined) ?? {},
       thumbnailUrl: null,
       svgUrl: null,
+      editorPreviewUrl: null,
       applyCount: 0,
       isActive: true,
     };
@@ -214,6 +217,11 @@ const framesServiceMock = {
       state.frame?.svgUrl ??
       `http://localhost:9000/frame-assets/frames/${frameId}/original.svg`,
   })),
+  getFrameEditorPreviewUrl: jest.fn(() => ({
+    url:
+      state.frame?.editorPreviewUrl ??
+      `http://localhost:9000/frame-assets/frames/${frameId}/editor-preview.png`,
+  })),
   recordApply: jest.fn(() => {
     if (state.frame) {
       state.frame.applyCount += 1;
@@ -299,10 +307,12 @@ const frameAssetsServiceMock = {
   uploadSvgAsset: jest.fn(() => {
     if (state.frame) {
       state.frame.svgUrl = `http://localhost:9000/frame-assets/frames/${frameId}/original.svg`;
+      state.frame.editorPreviewUrl = `http://localhost:9000/frame-assets/frames/${frameId}/editor-preview.png`;
       state.frame.thumbnailUrl = `http://localhost:9000/frame-assets/frames/${frameId}/thumbnail-md.png`;
     }
     return {
       svgUrl: `http://localhost:9000/frame-assets/frames/${frameId}/original.svg`,
+      editorPreviewUrl: `http://localhost:9000/frame-assets/frames/${frameId}/editor-preview.png`,
       thumbnails: {
         small: `http://localhost:9000/frame-assets/frames/${frameId}/thumbnail-sm.png`,
         medium: `http://localhost:9000/frame-assets/frames/${frameId}/thumbnail-md.png`,

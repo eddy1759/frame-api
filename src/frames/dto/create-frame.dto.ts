@@ -15,6 +15,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { FrameOrientation } from '../entities/frame-orientation.enum';
+import type { FrameMetadata } from '../utils/frame-metadata.util';
 
 export class CreateFrameDto {
   @ApiProperty({ example: 'Elegant Gold Border' })
@@ -67,10 +68,29 @@ export class CreateFrameDto {
   @IsEnum(FrameOrientation)
   orientation: FrameOrientation;
 
-  @ApiPropertyOptional({ type: 'object', additionalProperties: true })
+  @ApiPropertyOptional({
+    type: 'object',
+    additionalProperties: true,
+    example: {
+      style: 'dynamic',
+      palette: ['orange', 'black', 'white'],
+      imagePlacement: {
+        version: 1,
+        fit: 'cover',
+        window: {
+          x: 0.125,
+          y: 0.1111,
+          width: 0.75,
+          height: 0.7778,
+        },
+      },
+    },
+    description:
+      'Optional frame metadata. When provided, `imagePlacement` defines the normalized photo window used for framed image rendering.',
+  })
   @IsOptional()
   @IsObject()
-  metadata?: Record<string, unknown>;
+  metadata?: FrameMetadata;
 
   @ApiPropertyOptional({ default: false })
   @IsOptional()

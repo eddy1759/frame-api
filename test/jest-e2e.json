@@ -8,6 +8,7 @@
   },
   "moduleNameMapper": {
     "^jsdom$": "<rootDir>/../src/test/mocks/jsdom.mock.ts",
-    "^dompurify$": "<rootDir>/../src/test/mocks/dompurify.mock.ts"
+    "^dompurify$": "<rootDir>/../src/test/mocks/dompurify.mock.ts",
+    "^uuid$": "<rootDir>/../src/test/mocks/uuid.mock.ts"
   }
 }

@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: frame_user
       POSTGRES_PASSWORD: frame_password_dev
     ports:
-      - '5432:5432'
+      - '5433:5432' # changed from 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -42,8 +42,8 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     command: server /data --console-address ':9001'
     ports:
-      - '9000:9000'
-      - '9001:9001'
+      - '9003:9000' #changed from 9000
+      - '9004:9001' #change from 9001
     volumes:
       - minio_data:/data
 
@@ -63,10 +63,9 @@ services:
 
       # Public access
       mc anonymous set download local/frame-assets/frames &&
-      mc anonymous set download local/frame-assets/images/ &&
 
       # Lifecycle rule for temp uploads
-      mc ilm rule add local/frame-images-dev --prefix 'tmp/' --expire-days 1 || true &&
+      mc ilm rule add local/frame-assets --prefix 'tmp/' --expire-days 1 || true &&
 
       echo 'MinIO buckets and lifecycle configured'
       "

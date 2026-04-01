@@ -39,7 +39,10 @@ export class ImagesCacheService {
     params: Record<string, unknown>,
   ): Promise<any | null> {
     const hash = this.hashParams(params);
-    return this.cacheService.get(`images:user:${userId}:list:${hash}`);
+    const version = await this.getUserListVersion(userId);
+    return this.cacheService.get(
+      `images:user:${userId}:list:v${version}:${hash}`,
+    );
   }
 
   async setImageList(
@@ -48,15 +51,16 @@ export class ImagesCacheService {
     data: unknown,
   ): Promise<void> {
     const hash = this.hashParams(params);
+    const version = await this.getUserListVersion(userId);
     await this.cacheService.set(
-      `images:user:${userId}:list:${hash}`,
+      `images:user:${userId}:list:v${version}:${hash}`,
       data,
       120,
     ); // 2 min
   }
 
   async invalidateUserLists(userId: string): Promise<void> {
-    await this.cacheService.invalidateByPattern(`images:user:${userId}:list:*`);
+    await this.cacheService.increment(this.getUserListVersionKey(userId));
   }
 
   // Daily upload counter
@@ -90,5 +94,13 @@ export class ImagesCacheService {
       .update(JSON.stringify(sorted))
       .digest('hex')
       .substring(0, 16);
+  }
+
+  private getUserListVersionKey(userId: string): string {
+    return `images:user:${userId}:list:version`;
+  }
+
+  private async getUserListVersion(userId: string): Promise<number> {
+    return this.cacheService.getNumber(this.getUserListVersionKey(userId));
   }
 }

@@ -54,12 +54,16 @@ export class FramesCacheService {
   }
 
   async getList<T>(query: Record<string, unknown>): Promise<T | null> {
-    return this.cacheService.get<T>(this.getFramesListKey(query));
+    const version = await this.getListVersion();
+    return this.cacheService.get<T>(
+      `${this.getFramesListKey(query)}:v${version}`,
+    );
   }
 
   async setList<T>(query: Record<string, unknown>, value: T): Promise<void> {
+    const version = await this.getListVersion();
     await this.cacheService.set(
-      this.getFramesListKey(query),
+      `${this.getFramesListKey(query)}:v${version}`,
       value,
       this.ttl.frameList,
     );
@@ -104,12 +108,12 @@ export class FramesCacheService {
   async invalidateFrame(id: string, slug: string): Promise<void> {
     await this.cacheService.del(this.getFrameKey(id));
     await this.cacheService.del(this.getFrameSlugKey(slug));
-    await this.cacheService.invalidateByPattern('frames:list:*');
+    await this.bumpListVersion();
     await this.cacheService.del('frames:popular');
   }
 
   async invalidateFramesList(): Promise<void> {
-    await this.cacheService.invalidateByPattern('frames:list:*');
+    await this.bumpListVersion();
   }
 
   async invalidateCategories(slug?: string): Promise<void> {
@@ -141,5 +145,13 @@ export class FramesCacheService {
     }
 
     return JSON.stringify(normalized);
+  }
+
+  private async bumpListVersion(): Promise<void> {
+    await this.cacheService.increment('frames:list:version');
+  }
+
+  private async getListVersion(): Promise<number> {
+    return this.cacheService.getNumber('frames:list:version');
   }
 }

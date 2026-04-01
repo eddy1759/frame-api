@@ -35,6 +35,7 @@ const adminUser: User = {
   avatarUrl: null,
   status: UserStatus.ACTIVE,
   role: UserRole.ADMIN,
+  subscriptionActive: false,
   storageUsed: 0,
   storageLimit: 5368709120,
   createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -177,6 +178,8 @@ describe('Frames Admin API (e2e)', () => {
     framesServiceMock.softDeleteFrame.mockResolvedValue(undefined);
     frameAssetsServiceMock.uploadSvgAsset.mockResolvedValue({
       svgUrl: 'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+      editorPreviewUrl:
+        'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
       thumbnails: {
         small:
           'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-sm.png',

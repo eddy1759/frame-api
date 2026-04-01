@@ -1,29 +1,32 @@
+/* eslint-disable @typescript-eslint/explicit-function-return-type */
+import { createHash } from 'crypto';
 import { Injectable, Logger, HttpStatus } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
 import { InjectQueue } from '@nestjs/bullmq';
+import { InjectRepository } from '@nestjs/typeorm';
 import { Queue } from 'bullmq';
 import { v4 as uuidv4 } from 'uuid';
-import { ConfigService } from '@nestjs/config';
-import { UploadSession } from '../entities/upload-session.entity';
-import { Image } from '../entities/image.entity';
-import {
-  ProcessingStatus,
-  VariantType,
-  UploadSessionStatus,
-} from '../types/image.types';
-import { StorageService } from '../../common/services/storage.service';
+import { DataSource, Repository } from 'typeorm';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sharp: typeof import('sharp') = require('sharp');
+import { User } from '../../auth/entities/user.entity';
 import { BusinessException } from '../../common/filters/business.exception';
-import { StorageQuotaService } from './storage-quota.service';
-import { ImagesCacheService } from './images-cache.service';
-import { ImageVariantService } from './image-variant.service';
-import { RequestUploadUrlDto } from '../dto/request-upload-url.dto';
-import { CompleteUploadDto } from '../dto/complete-upload.dto';
+import { StorageService } from '../../common/services/storage.service';
 import {
   IMAGE_PROCESSING_QUEUE,
-  ImageProcessingJobType,
   ImageProcessingJobData,
+  ImageProcessingJobType,
 } from '../../common/queue/queue.constants';
+import { FramesService } from '../../frames/services/frames.service';
+import { CompleteUploadDto } from '../dto/complete-upload.dto';
+import { RequestUploadUrlDto } from '../dto/request-upload-url.dto';
+import { Image } from '../entities/image.entity';
+import { UploadSession } from '../entities/upload-session.entity';
+import { ProcessingStatus, UploadSessionStatus } from '../types/image.types';
+import { normalizeRenderTransform } from '../utils/render-transform.util';
+import { ImagesCacheService } from './images-cache.service';
+import { ImageCompositingService } from './image-compositing.service';
+import { StorageQuotaService } from './storage-quota.service';
 
 @Injectable()
 export class UploadService {
@@ -34,17 +37,19 @@ export class UploadService {
     private readonly uploadSessionRepository: Repository<UploadSession>,
     @InjectRepository(Image)
     private readonly imageRepository: Repository<Image>,
+    private readonly dataSource: DataSource,
     @InjectQueue(IMAGE_PROCESSING_QUEUE)
     private readonly processingQueue: Queue,
     private readonly storageService: StorageService,
     private readonly storageQuotaService: StorageQuotaService,
     private readonly imagesCacheService: ImagesCacheService,
-    private readonly imageVariantService: ImageVariantService,
+    private readonly imageCompositingService: ImageCompositingService,
+    private readonly framesService: FramesService,
     private readonly configService: ConfigService,
   ) {}
 
   async requestUploadUrl(
-    userId: string,
+    user: User,
     dto: RequestUploadUrlDto,
     ipAddress?: string,
     userAgent?: string,
@@ -56,77 +61,63 @@ export class UploadService {
     expiresAt: Date;
     maxFileSize: number;
   }> {
-    // 1. Check daily upload rate limit
-    const dailyCount =
-      await this.imagesCacheService.getDailyUploadCount(userId);
-    const dailyLimit = this.configService.get<number>(
-      'image.dailyUploadLimit',
-      100,
-    );
+    this.assertAllowedMimeType(dto.mimeType);
+    this.assertAllowedFileSize(dto.fileSize);
 
-    if (dailyCount >= dailyLimit) {
-      throw new BusinessException (
+    if (dto.frameId) {
+      await this.framesService.assertFrameEligibleForImage(dto.frameId, user);
+    }
+
+    const dailyCount = await this.countDailyUploads(user.id);
+    if (dailyCount >= this.dailyUploadLimit) {
+      throw new BusinessException(
         'DAILY_UPLOAD_LIMIT_REACHED',
-        `Daily upload limit of ${dailyLimit} reached. Try again tomorrow.`,
+        `Daily upload limit of ${this.dailyUploadLimit} reached.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
-    // 2. Check storage quota
-    await this.storageQuotaService.checkQuotaAvailability(userId, dto.fileSize);
-
-    // 3. Validate frameId if provided
-    if (dto.frameId) {
-      await this.validateFrameId(dto.frameId);
-    }
-
-    // 4. Generate storage key
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const extension = this.getExtensionFromMimeType(dto.mimeType);
     const uuid = uuidv4();
-    const storageKey = `tmp/${userId}/${year}/${month}/${uuid}.${extension}`;
-    const permanentKey = `images/${userId}/${year}/${month}/${uuid}.${extension}`;
-
-    // 5. Generate presigned PUT URL
-    const presignedUrlExpiry = this.configService.get<number>(
-      'storage.presignedUrlExpiry',
-      3600,
+    const storageKey = this.buildTemporaryStorageKey(
+      user.id,
+      uuid,
+      dto.mimeType,
+      new Date(),
     );
+
     const presigned = await this.storageService.generatePresignedPutUrl(
       storageKey,
       dto.mimeType,
       dto.fileSize,
-      presignedUrlExpiry,
+      this.presignedUrlExpiry,
     );
 
-    // 6. Create upload session
     const session = this.uploadSessionRepository.create({
       id: uuid,
-      userId,
-      frameId: dto.frameId || null,
+      userId: user.id,
+      frameId: dto.frameId ?? null,
       originalFilename: this.sanitizeFilename(dto.filename),
       mimeType: dto.mimeType,
       expectedFileSize: dto.fileSize,
       storageKey,
       presignedUrl: presigned.url,
       status: UploadSessionStatus.PENDING,
-      is360: dto.is360 || false,
+      is360: dto.is360 ?? false,
       expiresAt: presigned.expiresAt,
       ipAddress,
       userAgent,
     });
 
-    await this.uploadSessionRepository.save(session);
+    await this.dataSource.transaction(async (manager) => {
+      await this.storageQuotaService.reservePending(
+        user.id,
+        dto.fileSize,
+        manager,
+      );
+      await manager.getRepository(UploadSession).save(session);
+    });
 
-    // 7. Reserve pending quota
-    await this.storageQuotaService.reservePending(userId, dto.fileSize);
-
-    // 8. Increment daily count
-    await this.imagesCacheService.incrementDailyUploadCount(userId);
-
-    this.logger.log(`Upload session created: ${session.id} for user ${userId}`);
+    this.logger.log(`Upload session created: ${session.id}`);
 
     return {
       uploadSessionId: session.id,
@@ -134,10 +125,7 @@ export class UploadService {
       presignedUrl: presigned.url,
       storageKey,
       expiresAt: presigned.expiresAt,
-      maxFileSize: this.configService.get<number>(
-        'image.maxFileSize',
-        52428800,
-      ),
+      maxFileSize: this.maxFileSize,
     };
   }
 
@@ -151,7 +139,6 @@ export class UploadService {
     processingStatus: string;
     message: string;
   }> {
-    // 1. Find upload session
     const session = await this.uploadSessionRepository.findOne({
       where: { id: imageId },
     });
@@ -164,7 +151,6 @@ export class UploadService {
       );
     }
 
-    // 2. Verify ownership
     if (session.userId !== userId) {
       throw new BusinessException(
         'IMAGE_NOT_OWNED',
@@ -173,180 +159,227 @@ export class UploadService {
       );
     }
 
-    // 3. Check if already completed (idempotent)
     if (session.status === UploadSessionStatus.COMPLETED) {
+      return this.buildExistingCompletionResponse(imageId);
+    }
+
+    if (session.status === UploadSessionStatus.COMPLETING) {
       const existingImage = await this.imageRepository.findOne({
         where: { id: imageId },
       });
 
-      if (existingImage) {
-        return {
-          id: existingImage.id,
-          status: 'uploaded',
-          processingStatus: existingImage.processingStatus,
-          message: 'Upload was already completed.',
-        };
-      }
+      return {
+        id: imageId,
+        status: 'uploaded',
+        processingStatus:
+          existingImage?.processingStatus ?? ProcessingStatus.UPLOADED,
+        message: 'Upload completion is already in progress.',
+      };
     }
 
-    // 4. Verify session is pending
     if (session.status !== UploadSessionStatus.PENDING) {
       throw new BusinessException(
         'UPLOAD_SESSION_EXPIRED',
-        `Upload session is in '${session.status}' state and cannot be completed`,
+        `Upload session is in ${session.status} state`,
         HttpStatus.GONE,
       );
     }
 
-    // 5. Check expiry
     if (new Date() > session.expiresAt) {
-      await this.uploadSessionRepository.update(session.id, {
-        status: UploadSessionStatus.EXPIRED,
-      });
-      await this.storageQuotaService.releasePending(
-        userId,
-        Number(session.expectedFileSize),
-      );
-
+      await this.expireSession(session);
       throw new BusinessException(
         'UPLOAD_SESSION_EXPIRED',
-        'Presigned URL has expired. Please request a new upload URL.',
+        'Upload session expired',
         HttpStatus.GONE,
       );
     }
 
-    // 6. Verify file exists in storage at tmp/ key
-    const headResult = await this.storageService.headObject(session.storageKey);
+    const markedCompleting = await this.uploadSessionRepository
+      .createQueryBuilder()
+      .update(UploadSession)
+      .set({
+        status: UploadSessionStatus.COMPLETING,
+        errorMessage: null,
+      })
+      .where('id = :id', { id: session.id })
+      .andWhere('user_id = :userId', { userId })
+      .andWhere('status = :status', { status: UploadSessionStatus.PENDING })
+      .execute();
 
-    if (!headResult) {
+    if ((markedCompleting.affected ?? 0) !== 1) {
+      return this.buildExistingCompletionResponse(imageId);
+    }
+
+    let initialFrameState: Awaited<
+      ReturnType<ImageCompositingService['buildInitialFrameState']>
+    > | null = null;
+
+    try {
+      const head = await this.storageService.headObject(session.storageKey);
+      if (!head?.contentLength) {
+        await this.failSession(
+          session,
+          'Uploaded file not found in temporary storage.',
+        );
+      }
+
+      const actualSize = Number(head?.contentLength);
+      this.assertAllowedFileSize(actualSize);
+
+      const buffer = await this.storageService.getObjectBuffer(
+        session.storageKey,
+      );
+      const metadata = await sharp(buffer).metadata();
+      const detectedMimeType = this.detectMimeType(
+        metadata.format,
+        session.mimeType,
+      );
+
+      this.assertAllowedMimeType(detectedMimeType);
+
+      if (!this.mimeTypesMatch(detectedMimeType, session.mimeType)) {
+        await this.failSession(
+          session,
+          `Uploaded content type ${detectedMimeType} does not match requested type ${session.mimeType}.`,
+        );
+      }
+
+      const checksum = createHash('sha256').update(buffer).digest('hex');
+
+      if (dto.checksum && dto.checksum !== checksum) {
+        await this.failSession(session, 'Uploaded file checksum mismatch.');
+      }
+
+      const finalKey = this.buildPermanentStorageKey(
+        userId,
+        imageId,
+        session.mimeType,
+        session.createdAt,
+      );
+      const renderTransform =
+        session.frameId && dto.transform
+          ? normalizeRenderTransform(dto.transform)
+          : null;
+      if (!session.frameId && dto.transform) {
+        await this.failSession(
+          session,
+          'Render transform can only be supplied when a frame is attached.',
+        );
+      }
+      initialFrameState =
+        await this.imageCompositingService.buildInitialFrameState(
+          imageId,
+          session.frameId,
+        );
+      const frameState = initialFrameState;
+
+      await this.dataSource.transaction(async (manager) => {
+        const lockedSession = await manager
+          .getRepository(UploadSession)
+          .createQueryBuilder('session')
+          .setLock('pessimistic_write')
+          .where('session.id = :id', { id: session.id })
+          .getOne();
+
+        if (!lockedSession) {
+          throw new Error(
+            `Upload session ${session.id} disappeared during completion.`,
+          );
+        }
+
+        if (lockedSession.status !== UploadSessionStatus.COMPLETING) {
+          throw new Error(
+            `Upload session ${session.id} is not in completing state.`,
+          );
+        }
+
+        await this.storageQuotaService.confirmUsage(
+          userId,
+          actualSize,
+          Number(lockedSession.expectedFileSize),
+          manager,
+        );
+        if (initialFrameState?.frameSnapshotSize) {
+          await this.storageQuotaService.addVariantUsage(
+            userId,
+            Number(initialFrameState.frameSnapshotSize),
+            manager,
+          );
+        }
+
+        const image = manager.getRepository(Image).create({
+          id: lockedSession.id,
+          userId: lockedSession.userId,
+          frameId: frameState.frameId,
+          frameSnapshotKey: frameState.frameSnapshotKey,
+          frameSnapshotSize: frameState.frameSnapshotSize,
+          framePlacement: frameState.framePlacement,
+          renderTransform,
+          pendingFrameId: frameState.pendingFrameId,
+          pendingFrameSnapshotKey: frameState.pendingFrameSnapshotKey,
+          pendingFrameSnapshotSize: frameState.pendingFrameSnapshotSize,
+          pendingFramePlacement: frameState.pendingFramePlacement,
+          pendingRenderTransform: null,
+          frameRenderStatus: frameState.frameRenderStatus,
+          activeRenderRevision: frameState.activeRenderRevision,
+          title: dto.title ?? null,
+          description: dto.description ?? null,
+          originalFilename: lockedSession.originalFilename,
+          mimeType: detectedMimeType,
+          originalFormat: this.getExtensionFromMimeType(detectedMimeType),
+          storageKey: finalKey,
+          fileSize: actualSize,
+          is360: lockedSession.is360,
+          checksum,
+          processingStatus: ProcessingStatus.UPLOADED,
+          processingError: null,
+        });
+
+        await manager.getRepository(Image).save(image);
+        await manager.getRepository(UploadSession).update(lockedSession.id, {
+          status: UploadSessionStatus.COMPLETED,
+          completedAt: new Date(),
+          errorMessage: null,
+        });
+      });
+
+      await this.enqueueProcessing({
+        imageId,
+        userId,
+        tmpStorageKey: session.storageKey,
+        storageKey: finalKey,
+        mimeType: detectedMimeType,
+        is360: session.is360,
+        requestedAt: new Date().toISOString(),
+      });
+
+      await this.imagesCacheService.invalidateUserLists(userId);
+
+      this.logger.log(`Upload completed: ${imageId}`);
+
+      return {
+        id: imageId,
+        status: 'uploaded',
+        processingStatus: ProcessingStatus.UPLOADED,
+        message: 'Upload confirmed. Processing started.',
+      };
+    } catch (error) {
+      if (error instanceof BusinessException) {
+        throw error;
+      }
+
+      if (initialFrameState?.frameSnapshotKey) {
+        await this.storageService.deleteObject(
+          initialFrameState.frameSnapshotKey,
+        );
+      }
+      await this.failSession(session, (error as Error).message);
       throw new BusinessException(
-        'UPLOAD_NOT_FOUND_IN_STORAGE',
-        'File not found at the upload location. Please ensure the file was uploaded to the presigned URL.',
+        'UPLOAD_COMPLETION_FAILED',
+        'Upload completion failed.',
         HttpStatus.UNPROCESSABLE_ENTITY,
       );
     }
-
-    // 7. Verify file size (±1% tolerance)
-    const expectedSize = Number(session.expectedFileSize);
-    const actualSize = headResult.contentLength;
-    const tolerance = expectedSize * 0.01;
-    const maxAllowed = this.configService.get<number>(
-      'image.maxFileSize',
-      52428800,
-    );
-
-    if (actualSize > maxAllowed) {
-      throw new BusinessException(
-        'FILE_SIZE_EXCEEDED',
-        `File size ${actualSize} exceeds maximum of ${maxAllowed} bytes`,
-        HttpStatus.BAD_REQUEST,
-      );
-    }
-
-    if (Math.abs(actualSize - expectedSize) > Math.max(tolerance, 1024)) {
-      this.logger.warn(
-        `File size mismatch for session ${session.id}: expected ${expectedSize}, actual ${actualSize}`,
-      );
-    }
-
-    // 8. Re-verify quota with actual size
-    const usedBytes = await this.storageQuotaService.getUsedBytes(userId);
-    const quota = await this.storageQuotaService.getOrCreateQuota(userId);
-
-    if (Number(usedBytes) + actualSize > Number(quota.limitBytes)) {
-      await this.storageService.deleteObject(session.storageKey);
-      await this.storageQuotaService.releasePending(
-        userId,
-        Number(session.expectedFileSize),
-      );
-
-      throw new BusinessException(
-        'STORAGE_QUOTA_EXCEEDED',
-        'Storage quota would be exceeded with actual file size',
-        HttpStatus.FORBIDDEN,
-      );
-    }
-
-    // 9. Move file from tmp/ to images/
-    const permanentKey = session.storageKey.replace('tmp/', 'images/');
-    await this.storageService.moveObject(session.storageKey, permanentKey);
-
-    // 10. Create Image record
-    const extension = this.getExtensionFromMimeType(session.mimeType);
-    const image = this.imageRepository.create({
-      id: session.id,
-      userId: session.userId,
-      frameId: session.frameId,
-      title: dto.title || null,
-      description: dto.description || null,
-      originalFilename: session.originalFilename,
-      mimeType: session.mimeType,
-      originalFormat: extension,
-      storageKey: permanentKey,
-      fileSize: actualSize,
-      is360: session.is360,
-      checksum: dto.checksum || null,
-      processingStatus: ProcessingStatus.UPLOADED,
-    });
-
-    await this.imageRepository.save(image);
-
-    // 11. Create original variant record
-    await this.imageVariantService.createVariant({
-      imageId: image.id,
-      variantType: VariantType.ORIGINAL,
-      storageKey: permanentKey,
-      mimeType: session.mimeType,
-      fileSize: actualSize,
-      width: 0, // Will be set during processing
-      height: 0,
-    });
-
-    // 12. Update upload session
-    await this.uploadSessionRepository.update(session.id, {
-      status: UploadSessionStatus.COMPLETED,
-      completedAt: new Date(),
-    });
-
-    // 13. Confirm quota (move from pending to used)
-    await this.storageQuotaService.confirmUsage(
-      userId,
-      actualSize,
-      Number(session.expectedFileSize),
-    );
-
-    // 14. Dispatch processing job
-    const jobData: ImageProcessingJobData = {
-      imageId: image.id,
-      userId: image.userId,
-      storageKey: permanentKey,
-      mimeType: image.mimeType,
-      is360: image.is360,
-      requestedAt: new Date().toISOString(),
-    };
-
-    await this.processingQueue.add(
-      ImageProcessingJobType.PROCESS_IMAGE,
-      jobData,
-      {
-        jobId: image.id,
-        priority: image.is360 ? 2 : 1, // Standard images process first
-      },
-    );
-
-    // 15. Invalidate caches
-    await this.imagesCacheService.invalidateUserLists(userId);
-
-    this.logger.log(
-      `Upload completed: ${image.id} for user ${userId}, processing queued`,
-    );
-
-    return {
-      id: image.id,
-      status: 'uploaded',
-      processingStatus: ProcessingStatus.UPLOADED,
-      message: 'Upload confirmed. Image is being processed.',
-    };
   }
 
   async getUploadSession(sessionId: string, userId: string) {
@@ -376,6 +409,7 @@ export class UploadService {
       expiresAt: session.expiresAt,
       storageKey: session.storageKey,
       createdAt: session.createdAt,
+      errorMessage: session.errorMessage ?? null,
     };
   }
 
@@ -401,38 +435,228 @@ export class UploadService {
     }
 
     if (session.status !== UploadSessionStatus.PENDING) {
-      return; // Idempotent — already in a terminal state
+      return;
     }
 
-    // Cancel session
-    await this.uploadSessionRepository.update(sessionId, {
-      status: UploadSessionStatus.CANCELLED,
+    await this.dataSource.transaction(async (manager) => {
+      await this.storageQuotaService.releasePending(
+        userId,
+        Number(session.expectedFileSize),
+        manager,
+      );
+      await manager.getRepository(UploadSession).update(sessionId, {
+        status: UploadSessionStatus.CANCELLED,
+        errorMessage: null,
+      });
     });
 
-    // Release pending quota
-    await this.storageQuotaService.releasePending(
-      userId,
-      Number(session.expectedFileSize),
-    );
+    await this.storageService.deleteObject(session.storageKey);
+    this.logger.log(`Upload session cancelled: ${sessionId}`);
+  }
 
-    // Try to clean up any partial upload in storage
-    try {
-      await this.storageService.deleteObject(session.storageKey);
-    } catch {
-      // File may not exist yet — that's fine
-    }
+  private async countDailyUploads(userId: string): Promise<number> {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-    this.logger.log(
-      `Upload session cancelled: ${sessionId} for user ${userId}`,
+    return this.uploadSessionRepository
+      .createQueryBuilder('session')
+      .where('session.userId = :userId', { userId })
+      .andWhere('session.createdAt >= :startOfDay', { startOfDay })
+      .getCount();
+  }
+
+  private async expireSession(session: UploadSession): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      await this.storageQuotaService.releasePending(
+        session.userId,
+        Number(session.expectedFileSize),
+        manager,
+      );
+      await manager.getRepository(UploadSession).update(session.id, {
+        status: UploadSessionStatus.EXPIRED,
+        errorMessage: 'Upload session expired before completion.',
+      });
+    });
+  }
+
+  private async failSession(
+    session: UploadSession,
+    errorMessage: string,
+  ): Promise<never> {
+    await this.dataSource.transaction(async (manager) => {
+      await this.storageQuotaService.releasePending(
+        session.userId,
+        Number(session.expectedFileSize),
+        manager,
+      );
+      await manager.getRepository(UploadSession).update(session.id, {
+        status: UploadSessionStatus.FAILED,
+        errorMessage,
+      });
+    });
+
+    await this.storageService.deleteObject(session.storageKey);
+
+    throw new BusinessException(
+      'UPLOAD_VALIDATION_FAILED',
+      errorMessage,
+      HttpStatus.UNPROCESSABLE_ENTITY,
     );
   }
 
-  private async validateFrameId(frameId: string): Promise<void> {
-    // This would ideally call the FrameService, but for loose coupling
-    // we can do a direct DB check or import the Frame module
-    // For now, we validate it exists in the database
-    // This will be injected via FrameService when integrated
-    // Placeholder — frame validation
+  private async buildExistingCompletionResponse(imageId: string): Promise<{
+    id: string;
+    status: string;
+    processingStatus: string;
+    message: string;
+  }> {
+    const existingImage = await this.imageRepository.findOne({
+      where: { id: imageId },
+    });
+
+    return {
+      id: imageId,
+      status: 'uploaded',
+      processingStatus:
+        existingImage?.processingStatus ?? ProcessingStatus.UPLOADED,
+      message: existingImage
+        ? 'Upload already completed'
+        : 'Upload completion already recorded.',
+    };
+  }
+
+  private async enqueueProcessing(
+    jobData: ImageProcessingJobData,
+  ): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await this.processingQueue.add(
+          ImageProcessingJobType.PROCESS_IMAGE,
+          jobData,
+          {
+            jobId: `process-${jobData.imageId}`,
+            priority: jobData.is360 ? 2 : 1,
+          },
+        );
+        return;
+      } catch (error) {
+        this.logger.error(
+          `Queue handoff attempt ${attempt}/${maxAttempts} failed for ${jobData.imageId}: ${(error as Error).message}`,
+        );
+        if (attempt < maxAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+    }
+  }
+
+  private assertAllowedMimeType(mimeType: string): void {
+    if (!this.allowedMimeTypes.includes(mimeType)) {
+      throw new BusinessException(
+        'INVALID_FILE_TYPE',
+        `Unsupported image type: ${mimeType}`,
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  private assertAllowedFileSize(fileSize: number): void {
+    if (fileSize <= 0 || fileSize > this.maxFileSize) {
+      throw new BusinessException(
+        'FILE_TOO_LARGE',
+        'File exceeds allowed size',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+  }
+
+  private detectMimeType(
+    format: string | undefined,
+    requestedMimeType: string,
+  ): string {
+    if (!format) {
+      throw new BusinessException(
+        'INVALID_IMAGE',
+        'Unable to detect uploaded image format.',
+        HttpStatus.UNPROCESSABLE_ENTITY,
+      );
+    }
+
+    if (format === 'jpeg') {
+      return 'image/jpeg';
+    }
+
+    if (format === 'png') {
+      return 'image/png';
+    }
+
+    if (format === 'heif') {
+      return requestedMimeType === 'image/heic' ? 'image/heic' : 'image/heif';
+    }
+
+    throw new BusinessException(
+      'INVALID_FILE_TYPE',
+      `Unsupported detected image format: ${format}`,
+      HttpStatus.UNPROCESSABLE_ENTITY,
+    );
+  }
+
+  private mimeTypesMatch(
+    detectedMimeType: string,
+    requestedMimeType: string,
+  ): boolean {
+    if (detectedMimeType === requestedMimeType) {
+      return true;
+    }
+
+    const heifSet = new Set(['image/heic', 'image/heif']);
+    return heifSet.has(detectedMimeType) && heifSet.has(requestedMimeType);
+  }
+
+  private buildTemporaryStorageKey(
+    userId: string,
+    imageId: string,
+    mimeType: string,
+    now: Date,
+  ): string {
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+
+    return `tmp/${userId}/${year}/${month}/${imageId}.${this.getExtensionFromMimeType(mimeType)}`;
+  }
+
+  private buildPermanentStorageKey(
+    userId: string,
+    imageId: string,
+    mimeType: string,
+    createdAt: Date,
+  ): string {
+    const year = createdAt.getFullYear();
+    const month = String(createdAt.getMonth() + 1).padStart(2, '0');
+
+    return `images/${userId}/${year}/${month}/${imageId}.${this.getExtensionFromMimeType(mimeType)}`;
+  }
+
+  private get allowedMimeTypes(): string[] {
+    return this.configService.get<string[]>('image.allowedMimeTypes', [
+      'image/jpeg',
+      'image/png',
+      'image/heic',
+      'image/heif',
+    ]);
+  }
+
+  private get dailyUploadLimit(): number {
+    return this.configService.get<number>('image.dailyUploadLimit', 100);
+  }
+
+  private get maxFileSize(): number {
+    return this.configService.get<number>('image.maxSize', 52428800);
+  }
+
+  private get presignedUrlExpiry(): number {
+    return this.configService.get<number>('storage.presignedUrlExpiry', 3600);
   }
 
   private getExtensionFromMimeType(mimeType: string): string {
@@ -442,10 +666,12 @@ export class UploadService {
       'image/heic': 'heic',
       'image/heif': 'heif',
     };
-    return map[mimeType] || 'jpg';
+
+    return map[mimeType] ?? 'jpg';
   }
 
   private sanitizeFilename(filename: string): string {
-    return filename.replace(/[^a-zA-Z0-9._-]/g, '_').substring(0, 255);
+    const cleaned = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+    return cleaned.substring(0, 255);
   }
 }

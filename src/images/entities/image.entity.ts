@@ -8,12 +8,20 @@ import {
   Index,
 } from 'typeorm';
 import { ImageVariant } from './image-variant.entity';
-import { ImageOrientation, ProcessingStatus } from '../types/image.types';
+import { ImageRenderVariant } from './image-render-variant.entity';
+import {
+  FrameRenderStatus,
+  ImageOrientation,
+  ProcessingStatus,
+} from '../types/image.types';
+import type { FrameImagePlacement } from '../../frames/utils/frame-metadata.util';
+import type { RenderTransformV1 } from '../utils/render-transform.util';
 
 @Entity('images')
 @Index('idx_image_user_created', ['userId', 'createdAt'])
 @Index('idx_image_user_not_deleted', ['userId', 'isDeleted'])
 @Index('idx_image_frame', ['frameId'])
+@Index('idx_image_pending_frame', ['pendingFrameId'])
 @Index('idx_image_processing_status', ['processingStatus'])
 @Index('idx_image_storage_key', ['storageKey'], { unique: true })
 export class Image {
@@ -24,13 +32,65 @@ export class Image {
   userId: string;
 
   @Column({ name: 'frame_id', type: 'uuid', nullable: true })
-  frameId: string;
+  frameId: string | null;
+
+  @Column({
+    name: 'frame_snapshot_key',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
+  frameSnapshotKey: string | null;
+
+  @Column({ name: 'frame_snapshot_size', type: 'bigint', nullable: true })
+  frameSnapshotSize: number | null;
+
+  @Column({ name: 'frame_placement', type: 'jsonb', nullable: true })
+  framePlacement: FrameImagePlacement | null;
+
+  @Column({ name: 'render_transform', type: 'jsonb', nullable: true })
+  renderTransform: RenderTransformV1 | null;
+
+  @Column({ name: 'pending_frame_id', type: 'uuid', nullable: true })
+  pendingFrameId: string | null;
+
+  @Column({
+    name: 'pending_frame_snapshot_key',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
+  pendingFrameSnapshotKey: string | null;
+
+  @Column({
+    name: 'pending_frame_snapshot_size',
+    type: 'bigint',
+    nullable: true,
+  })
+  pendingFrameSnapshotSize: number | null;
+
+  @Column({ name: 'pending_frame_placement', type: 'jsonb', nullable: true })
+  pendingFramePlacement: FrameImagePlacement | null;
+
+  @Column({ name: 'pending_render_transform', type: 'jsonb', nullable: true })
+  pendingRenderTransform: RenderTransformV1 | null;
+
+  @Column({
+    name: 'frame_render_status',
+    type: 'enum',
+    enum: FrameRenderStatus,
+    default: FrameRenderStatus.NONE,
+  })
+  frameRenderStatus: FrameRenderStatus;
+
+  @Column({ name: 'active_render_revision', type: 'int', default: 0 })
+  activeRenderRevision: number;
 
   @Column({ name: 'title', type: 'varchar', length: 255, nullable: true })
-  title: string;
+  title: string | null;
 
   @Column({ name: 'description', type: 'text', nullable: true })
-  description: string;
+  description: string | null;
 
   @Column({ name: 'original_filename', type: 'varchar', length: 255 })
   originalFilename: string;
@@ -48,13 +108,13 @@ export class Image {
   fileSize: number;
 
   @Column({ name: 'width', type: 'int', nullable: true })
-  width: number;
+  width: number | null;
 
   @Column({ name: 'height', type: 'int', nullable: true })
-  height: number;
+  height: number | null;
 
   @Column({ name: 'aspect_ratio', type: 'varchar', length: 10, nullable: true })
-  aspectRatio: string;
+  aspectRatio: string | null;
 
   @Column({
     name: 'orientation',
@@ -62,7 +122,7 @@ export class Image {
     enum: ImageOrientation,
     nullable: true,
   })
-  orientation: ImageOrientation;
+  orientation: ImageOrientation | null;
 
   @Column({ name: 'is_360', type: 'boolean', default: false })
   is360: boolean;
@@ -80,7 +140,7 @@ export class Image {
     scale: 8,
     nullable: true,
   })
-  gpsLatitude: number;
+  gpsLatitude: number | null;
 
   @Column({
     name: 'gps_longitude',
@@ -89,10 +149,10 @@ export class Image {
     scale: 8,
     nullable: true,
   })
-  gpsLongitude: number;
+  gpsLongitude: number | null;
 
-  @Column({ name: 'check_sum', type: 'varchar', length: 64, nullable: true })
-  checksum: string;
+  @Column({ name: 'checksum', type: 'varchar', length: 64, nullable: true })
+  checksum: string | null;
 
   @Column({
     name: 'processing_status',
@@ -103,7 +163,7 @@ export class Image {
   processingStatus: ProcessingStatus;
 
   @Column({ name: 'processing_error', type: 'text', nullable: true })
-  processingError: string;
+  processingError: string | null;
 
   @Column({
     name: 'thumbnail_url',
@@ -111,7 +171,7 @@ export class Image {
     length: 512,
     nullable: true,
   })
-  thumbnailUrl: string;
+  thumbnailUrl: string | null;
 
   @Column({ name: 'is_public', type: 'boolean', default: false })
   isPublic: boolean;
@@ -120,7 +180,7 @@ export class Image {
   isDeleted: boolean;
 
   @Column({ name: 'deleted_at', type: 'timestamptz', nullable: true })
-  deletedAt: Date;
+  deletedAt: Date | null;
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;
@@ -130,4 +190,9 @@ export class Image {
 
   @OneToMany(() => ImageVariant, (variant) => variant.image, { cascade: true })
   variants: ImageVariant[];
+
+  @OneToMany(() => ImageRenderVariant, (variant) => variant.image, {
+    cascade: true,
+  })
+  renderVariants: ImageRenderVariant[];
 }

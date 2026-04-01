@@ -17,6 +17,7 @@ import { Tag } from './tag.entity';
 import { FrameAsset } from './frame-asset.entity';
 import { UserSavedFrame } from './user-saved-frame.entity';
 import { FrameOrientation } from './frame-orientation.enum';
+import type { FrameMetadata } from '../utils/frame-metadata.util';
 
 @Entity('frames')
 export class Frame {
@@ -55,7 +56,7 @@ export class Frame {
   orientation: FrameOrientation;
 
   @Column({ type: 'jsonb', default: () => "'{}'::jsonb" })
-  metadata: Record<string, unknown>;
+  metadata: FrameMetadata;
 
   @Column({ name: 'view_count', type: 'integer', default: 0 })
   viewCount: number;
@@ -82,6 +83,14 @@ export class Frame {
     nullable: true,
   })
   thumbnailUrl: string | null;
+
+  @Column({
+    name: 'editor_preview_url',
+    type: 'varchar',
+    length: 512,
+    nullable: true,
+  })
+  editorPreviewUrl: string | null;
 
   @Column({ name: 'created_by', type: 'uuid', nullable: true })
   createdById: string | null;

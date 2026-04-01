@@ -63,6 +63,6 @@ import { AdminGuard, OptionalJwtGuard } from '../auth/guards';
     PremiumFrameGuard,
     AuthThrottleGuard,
   ],
-  exports: [FramesService, CategoriesService, TagsService],
+  exports: [FramesService, CategoriesService, TagsService, FrameAssetsService],
 })
 export class FramesModule {}

@@ -34,6 +34,7 @@ describe('FrameAssetsService', () => {
       isAiGenerated: false,
       sortOrder: 0,
       svgUrl: null,
+      editorPreviewUrl: null,
       thumbnailUrl: null,
       createdById: null,
       createdBy: null,
@@ -115,6 +116,39 @@ describe('FrameAssetsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
+  it('rejects SVG uploads without a usable canvas', async () => {
+    frameRepository.findOne.mockResolvedValueOnce(makeFrame());
+
+    await expect(
+      service.uploadSvgAsset('frame-1', {
+        buffer: Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10" /></svg>',
+        ),
+        size: 74,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('rejects SVG uploads whose aspect ratio does not match the frame', async () => {
+    frameRepository.findOne.mockResolvedValueOnce(
+      makeFrame({
+        width: 1920,
+        height: 1080,
+        aspectRatio: '16:9',
+        orientation: FrameOrientation.LANDSCAPE,
+      }),
+    );
+
+    await expect(
+      service.uploadSvgAsset('frame-1', {
+        buffer: Buffer.from(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920"><rect width="1080" height="1920" fill="#000" /></svg>',
+        ),
+        size: 122,
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
   it('sanitizes malicious SVG and uploads all derived assets', async () => {
     const frame = makeFrame();
     frameRepository.findOne.mockResolvedValueOnce(frame);
@@ -122,6 +156,8 @@ describe('FrameAssetsService', () => {
       makeFrame({
         svgUrl:
           'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+        editorPreviewUrl:
+          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
         thumbnailUrl:
           'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
       }),
@@ -161,7 +197,7 @@ describe('FrameAssetsService', () => {
       });
 
     const maliciousSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" onload="alert(1)">
         <script>alert('xss')</script>
         <use href="https://evil.example/resource.svg#id" />
         <foreignObject><div>bad</div></foreignObject>
@@ -177,7 +213,7 @@ describe('FrameAssetsService', () => {
       originalname: 'malicious.svg',
     });
 
-    expect(storageService.uploadBuffer).toHaveBeenCalledTimes(4);
+    expect(storageService.uploadBuffer).toHaveBeenCalledTimes(5);
     expect(frameAssetRepository.delete).toHaveBeenCalledWith({
       frameId: 'frame-1',
     });
@@ -200,6 +236,8 @@ describe('FrameAssetsService', () => {
 
     expect(result).toEqual({
       svgUrl: 'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+      editorPreviewUrl:
+        'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
       thumbnails: {
         small:
           'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-sm.png',
@@ -218,6 +256,8 @@ describe('FrameAssetsService', () => {
       makeFrame({
         svgUrl:
           'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+        editorPreviewUrl:
+          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
         thumbnailUrl:
           'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
       }),
@@ -257,7 +297,7 @@ describe('FrameAssetsService', () => {
       });
 
     const maliciousSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+      <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1080 1920">
         <image xlink:href="https://evil.example/payload.png" />
         <image src="https://evil.example/payload-2.png" />
         <a href="javascript:alert(1)">x</a>
@@ -280,5 +320,78 @@ describe('FrameAssetsService', () => {
     expect(sanitized).not.toMatch(/url\(javascript:/i);
     expect(sanitized).not.toMatch(/url\(\/\/evil\.example/i);
     expect(sanitized).not.toMatch(/evil\.example\/bg\.png/i);
+  });
+
+  it('preserves safe gradient definitions needed for overlay frames', async () => {
+    const frame = makeFrame();
+    frameRepository.findOne.mockResolvedValueOnce(frame);
+    frameRepository.save.mockResolvedValueOnce(
+      makeFrame({
+        svgUrl:
+          'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+        editorPreviewUrl:
+          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
+        thumbnailUrl:
+          'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
+      }),
+    );
+
+    const uploadMock = storageService.uploadBuffer as jest.Mock;
+    uploadMock.mockImplementation(
+      (key: string, body: Buffer) =>
+        ({
+          key,
+          size: body.byteLength,
+          url: `http://localhost:9000/frame-assets/${key}`,
+        }) as { key: string; size: number; url: string },
+    );
+
+    jest
+      .spyOn(
+        service as unknown as {
+          createThumbnail: (...args: unknown[]) => Promise<unknown>;
+        },
+        'createThumbnail',
+      )
+      .mockResolvedValueOnce({
+        buffer: Buffer.from('png-sm'),
+        width: 120,
+        height: 150,
+      })
+      .mockResolvedValueOnce({
+        buffer: Buffer.from('png-md'),
+        width: 240,
+        height: 300,
+      })
+      .mockResolvedValueOnce({
+        buffer: Buffer.from('png-lg'),
+        width: 480,
+        height: 600,
+      });
+
+    const gradientSvg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920">
+        <defs>
+          <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#111827" />
+            <stop offset="100%" stop-color="#374151" stop-opacity="0.9" />
+          </linearGradient>
+        </defs>
+        <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd" />
+      </svg>
+    `;
+
+    await service.uploadSvgAsset('frame-1', {
+      buffer: Buffer.from(gradientSvg, 'utf8'),
+      size: Buffer.byteLength(gradientSvg),
+    });
+
+    const [, svgBuffer] = uploadMock.mock.calls[0] as [string, Buffer];
+    const sanitized = svgBuffer.toString('utf8');
+
+    expect(sanitized).toContain('<linearGradient');
+    expect(sanitized).toContain('id="frameFill"');
+    expect(sanitized).toContain('fill="url(#frameFill)"');
+    expect(sanitized).toContain('fill-rule="evenodd"');
   });
 });

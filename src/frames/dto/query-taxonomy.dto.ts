@@ -1,4 +1,4 @@
-﻿import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   IsBoolean,
   IsInt,
@@ -27,7 +27,9 @@ export class QueryTagsDto {
 export class QueryCategoriesDto {
   @ApiPropertyOptional({ default: false })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) =>
+    value === 'true' ? true : value === 'false' ? false : value,
+  )
   @IsBoolean()
   includeEmpty?: boolean = false;
 }
