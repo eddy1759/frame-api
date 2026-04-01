@@ -42,6 +42,10 @@ module.exports = {
         'common', // Shared utilities
         'deps', // Dependencies
         'release', // Releases
+        'docs', // Documentation
+        'ci', // CI/CD
+        'frame', // Core framework changes
+        'image', // Image processing
       ],
     ],
     'scope-case': [2, 'always', 'lower-case'],

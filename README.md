@@ -1,80 +1,91 @@
 # Frame API
 
-NestJS backend for authentication, frame catalog management, SVG asset processing, caching, and popularity tracking.
+NestJS backend for OAuth authentication, frame catalog management, private image ingestion, and a hybrid image rendering pipeline that combines canonical raw variants with revisioned composited frame renders.
 
-## Table of Contents
+## What This Service Owns
 
-- Overview
-- Architecture
-- Tech Stack
-- Project Structure
-- Prerequisites
-- Local Setup
-- Environment Variables
-- Database and Migrations
-- Running the API
-- API Conventions
-- Endpoint Map
-- Auth, Roles, and Premium Access
-- Frame Asset Upload Workflow
-- Sample SVG Overlays
-- Testing and Performance
-- Troubleshooting
+- OAuth login with Google and Apple, JWT access tokens, refresh-token rotation, and session management.
+- Public and premium frame discovery, saved frames, category/tag taxonomy, and popularity tracking.
+- Admin frame authoring, secure SVG ingestion, thumbnail generation, and editor preview generation.
+- Private user image uploads with quota reservation, asynchronous processing, EXIF sanitization, and raw image variants.
+- Staged frame and transform edits that are promoted through explicit reprocess operations.
+- Revisioned framed render caching with read-through fallback to raw variants when a composited asset is missing.
 
-## Overview
+## Companion Docs
 
-This service provides:
+- [Hybrid image and frame rendering design](./docs/hybrid-image-frame-rendering.md)
+- [Playground frontend README](../frame-api-playground/README.md)
 
-- OAuth-based authentication and JWT session lifecycle
-- Public frame browsing with filtering/search/pagination
-- Admin frame/category/tag management
-- Secure SVG upload and sanitization
-- Generated PNG thumbnails from SVG assets
-- Redis-backed caching and popularity counters
-- Consistent API response envelope and error format
+## Architecture At A Glance
 
-## Architecture
+```text
+Clients / Playground
+        |
+        v
+NestJS API (auth, frames, images, health)
+        |
+        +--> PostgreSQL
+        |     - users, oauth accounts, refresh tokens
+        |     - frames, categories, tags, frame assets, saved frames
+        |     - images, upload sessions, raw variants, render variants
+        |
+        +--> Redis
+        |     - JWT session presence and session sets
+        |     - response caches and list version counters
+        |     - frame popularity sorted sets
+        |     - render single-flight locks
+        |
+        +--> BullMQ
+        |     - raw image processing jobs
+        |     - framed render prewarm jobs
+        |
+        +--> S3-compatible object storage (MinIO locally)
+              - public frame assets under frames/*
+              - private image uploads, variants, snapshots, and renders
+```
 
-High-level flow:
+## Core Runtime Model
 
-1. API receives request at `api/v1/*`.
-2. Global JWT guard protects routes by default.
-3. `@Public()` routes bypass mandatory auth.
-4. Frames module serves metadata; SVG endpoint returns URL only (no file proxy).
-5. Redis is used for:
-   - response cache keys
-   - popularity sorted sets (`popular:frames:*`)
-6. PostgreSQL stores durable entities and counters.
-7. MinIO stores SVGs and thumbnails through S3-compatible SDK.
+- Authentication is global by default through `JwtAuthGuard`; routes must opt out with `@Public()`.
+- Public frame routes can still accept an optional access token to return user-aware data such as `isSaved`.
+- Premium raw frame asset access is guarded separately from frame detail metadata.
+- Image uploads are two-step:
+  1. Request a presigned PUT URL and reserve quota.
+  2. Confirm completion so the API validates the object, creates the image row, snapshots any selected frame, and queues processing.
+- Raw image variants are generated first and remain the source of truth.
+- Framed variants are generated on demand or prewarmed and stored per render revision.
 
-## Tech Stack
+## Project Layout
 
-- NestJS 10
-- TypeORM + PostgreSQL
-- Redis (ioredis)
-- AWS SDK v3 S3 client (MinIO-compatible)
-- Sharp (thumbnail generation)
-- Swagger/OpenAPI
-- Jest + Supertest + k6
+| Path                      | Purpose                                                                                     |
+| ------------------------- | ------------------------------------------------------------------------------------------- |
+| `src/auth`                | OAuth providers, JWT guards/strategy, session lifecycle, profile endpoints                  |
+| `src/frames`              | Frame catalog, categories, tags, SVG asset pipeline, premium gating, popularity sync        |
+| `src/images`              | Upload sessions, raw variant processing, quota tracking, staged frame edits, render caching |
+| `src/common`              | Config, Redis, BullMQ setup, shared services, response/error infrastructure                 |
+| `src/database/migrations` | Additive schema and seed migrations                                                         |
+| `sample-svgs`             | Local frame overlay SVG fixtures used by sample frame tooling                               |
+| `scripts`                 | Key generation, sample asset repair, token/seed helpers                                     |
+| `test`                    | Auth, frames, and image e2e coverage plus perf scripts                                      |
+| `docs`                    | Design and operational notes                                                                |
 
-## Project Structure
+## Local Dependencies
 
-Key folders:
+| Dependency    | Local default           | Notes                                  |
+| ------------- | ----------------------- | -------------------------------------- |
+| Node.js       | 20+                     | Required for NestJS build/runtime      |
+| PostgreSQL    | `localhost:5432`        | Database `frame_db`, user `frame_user` |
+| Redis         | `localhost:6382`        | Cache/session Redis with password auth |
+| MinIO API     | `http://localhost:9000` | S3-compatible object storage           |
+| MinIO Console | `http://localhost:9001` | Local bucket inspection                |
 
-- `src/auth`: auth module (OAuth login, token refresh, session management)
-- `src/frames`: frames domain (controllers, services, entities, guards, cron)
-- `src/common`: shared services, config, filters, interceptors, redis module
-- `src/database/migrations`: SQL schema/data migrations
-- `sample-svgs`: upload-ready frame overlay SVGs for manual testing
-- `test`: e2e and performance scripts
+The repo ships a local `docker-compose.yml` that starts PostgreSQL, Redis, MinIO, and a MinIO bootstrap container that:
 
-## Prerequisites
+- creates the `frame-assets` bucket
+- exposes `frames/*` as publicly downloadable
+- adds a 1-day lifecycle rule for `tmp/*`
 
-- Node.js 20+
-- npm
-- Docker + Docker Compose
-
-## Local Setup
+## Quick Start
 
 1. Install dependencies:
 
@@ -82,87 +93,105 @@ Key folders:
 npm install
 ```
 
-2. Generate JWT keys:
-
-```bash
-npm run keys:generate
-```
-
-3. Create env file:
+2. Copy the env template:
 
 ```bash
 cp .env.example .env
 ```
 
-4. Ensure `.env` local values are aligned (especially ports and storage):
+3. Generate JWT keys:
 
-- `PORT=8000`
-- `API_PREFIX=api/v1`
-- `DB_HOST=localhost`
-- `DB_PORT=5432`
-- `REDIS_HOST=localhost`
-- `REDIS_PORT=6382`
-- `REDIS_PASSWORD=frame_redis_password_dev`
-- `OBJECT_STORAGE_ENDPOINT=http://localhost:9000`
-- `OBJECT_STORAGE_BUCKET=frame-assets`
-- `CDN_BASE_URL=http://localhost:9000/frame-assets`
+```bash
+npm run keys:generate
+```
 
-5. Start infra:
+4. Start local infrastructure:
 
 ```bash
 docker compose up -d
 ```
 
-6. Run migrations:
+5. Check migration state if you want to inspect the schema explicitly:
 
 ```bash
-npm run migration:run
+npm run migration:show
 ```
 
-7. Start API:
+6. Start the API:
 
 ```bash
 npm run start:dev
 ```
 
-## Environment Variables
+7. Open the local surfaces:
 
-Validated by `src/common/config/env.validation.ts`.
+- API base: `http://localhost:8000/api/v1`
+- Swagger: `http://localhost:8000/api/docs`
+- Health: `http://localhost:8000/api/v1/health`
+- Playground frontend: see `../frame-api-playground`
 
-Core runtime:
+## Local Environment Reference
 
-- `NODE_ENV` (`development|staging|production|test`)
-- `PORT` (default `3000`, commonly `8000` locally)
-- `HOST` (default `0.0.0.0`)
-- `API_PREFIX` (recommended `api/v1`)
+The main validated env surface lives in `src/common/config/env.validation.ts`. Two low-level runtime knobs are also read directly by config modules: `DB_SSL` and `REDIS_DB`.
 
-Database:
+### App and HTTP
 
-- `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`
-- `DB_POOL_MAX`, `DB_POOL_MIN`
-
-Redis:
-
-- `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`
-
-JWT:
-
-- `JWT_PRIVATE_KEY_PATH`, `JWT_PUBLIC_KEY_PATH`
-- `JWT_ACCESS_TOKEN_TTL`, `JWT_REFRESH_TOKEN_TTL`
-
-OAuth:
-
-- `GOOGLE_CLIENT_ID`, `APPLE_CLIENT_ID`
-
-Security and HTTP:
-
-- `ENCRYPTION_KEY`
-- `THROTTLE_TTL`, `THROTTLE_LIMIT`
-- `CORS_ORIGINS`
-- `HTTP_KEEP_ALIVE_TIMEOUT`, `HTTP_HEADERS_TIMEOUT`, `HTTP_REQUEST_TIMEOUT`
+- `NODE_ENV`: `development`, `staging`, `production`, or `test`
+- `PORT`: API port, commonly `8000` locally
+- `HOST`: bind host, defaults to `0.0.0.0`
+- `API_PREFIX`: recommended `api/v1`
+- `CORS_ORIGINS`: comma-separated browser origins
+- `HTTP_KEEP_ALIVE_TIMEOUT`
+- `HTTP_HEADERS_TIMEOUT`
+- `HTTP_REQUEST_TIMEOUT`
 - `HTTP_ACCESS_LOG_ENABLED`
 
-Object storage/CDN:
+### Database
+
+- `DB_HOST`
+- `DB_PORT`
+- `DB_USERNAME`
+- `DB_PASSWORD`
+- `DB_NAME`
+- `DB_POOL_MAX`
+- `DB_POOL_MIN`
+- `DB_AUTO_RUN_MIGRATIONS`
+- `DB_SSL`: used by `database.config.ts` for TLS enablement
+
+Development note:
+
+- `DB_AUTO_RUN_MIGRATIONS` defaults to `true` in `development`.
+- In non-development environments, migrations stay manual unless you opt in by setting `DB_AUTO_RUN_MIGRATIONS=true`.
+
+### Redis and Queueing
+
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
+- `REDIS_DB`: base Redis DB for cache/session data
+- `REDIS_QUEUE_HOST`
+- `REDIS_QUEUE_PORT`
+- `REDIS_QUEUE_PASSWORD`
+- `REDIS_QUEUE_DB`
+- `REDIS_QUEUE_NAME`
+- `QUEUE_ATTEMPTS`
+- `QUEUE_BACKOFF_DELAY`
+- `QUEUE_REMOVE_ON_COMPLETE_AGE`
+- `QUEUE_REMOVE_ON_COMPLETE_COUNT`
+- `QUEUE_REMOVE_ON_FAIL_AGE`
+
+### JWT and OAuth
+
+- `JWT_PRIVATE_KEY_PATH`
+- `JWT_PUBLIC_KEY_PATH`
+- `JWT_ACCESS_TOKEN_TTL`
+- `JWT_REFRESH_TOKEN_TTL`
+- `GOOGLE_CLIENT_ID`
+- `APPLE_CLIENT_ID`
+
+Only the OAuth client identifiers are consumed by the provider implementations in this repo.
+
+### Storage and Image Processing
 
 - `OBJECT_STORAGE_ENDPOINT`
 - `OBJECT_STORAGE_REGION`
@@ -172,35 +201,52 @@ Object storage/CDN:
 - `OBJECT_STORAGE_FORCE_PATH_STYLE`
 - `OBJECT_STORAGE_USE_SSL`
 - `CDN_BASE_URL`
+- `PRESIGNED_URL_EXPIRY`
+- `IMAGE_MAX_SIZE`
+- `IMAGE_DAILY_UPLOAD_LIMIT`
+- `IMAGE_DEFAULT_STORAGE_LIMIT`
+- `IMAGE_SOFT_DELETE_GRACE_DAYS`
 
-## Database and Migrations
+## Local Storage Layout
 
-Run:
+Common object key patterns used by the codebase:
 
-```bash
-npm run migration:run
-npm run migration:show
-```
+- `tmp/<userId>/<year>/<month>/<imageId>.<ext>`: temporary upload-session object
+- `images/<userId>/<year>/<month>/<imageId>.<ext>`: canonical original image
+- `images/<userId>/<year>/<month>/<imageId>_<variant>.jpg`: raw image variants
+- `frames/<frameId>/original.svg`: sanitized frame SVG
+- `frames/<frameId>/thumbnail-*.png`: frame thumbnails
+- `frames/<frameId>/editor-preview.png`: editor overlay preview
+- `image-frame-snapshots/<imageId>/rev-<n>/frame.svg`: per-image frame snapshot
+- `image-renders/<imageId>/rev-<n>/<variant>.jpg`: composited framed variants
 
-Relevant schema includes:
+Public vs private:
 
-- auth tables (`users`, `oauth_accounts`, `refresh_tokens`)
-- frames domain (`frames`, `categories`, `tags`, `frame_assets`, junction tables, `user_saved_frames`)
-- seed migrations for default categories and sample frames
+- Frame assets under `frames/*` are intended to be publicly downloadable through the configured CDN/base URL.
+- Image originals, raw variants, snapshots, and composited renders are served through presigned GET URLs.
 
-## Running the API
+## Auth And Authorization Model
 
-Local URLs (assuming `PORT=8000`, `API_PREFIX=api/v1`):
+- `JwtAuthGuard` is registered globally through `APP_GUARD`.
+- `@Public()` bypasses mandatory auth.
+- `OptionalJwtGuard` attaches a user on public frame routes when a valid access token is present.
+- `AdminGuard` restricts admin routes to `role=admin`.
+- `PremiumFrameGuard` protects premium raw frame asset endpoints:
+  - admin access is allowed
+  - subscribed users are allowed
+  - unauthenticated users get `401`
+  - authenticated but unsubscribed users get `403`
 
-- API base: `http://localhost:8000/api/v1`
-- Swagger UI: `http://localhost:8000/api/docs` (non-production only)
-- Health: `http://localhost:8000/api/v1/health`
-- MinIO API: `http://localhost:9000`
-- MinIO Console: `http://localhost:9001`
+Session behavior:
 
-## API Conventions
+- access tokens are signed with RS256
+- refresh tokens are stored hashed in PostgreSQL
+- active session presence is tracked in Redis
+- refresh-token reuse triggers family-wide revocation and session invalidation
 
-Success response:
+## API Contract Conventions
+
+All successful responses are wrapped by `TransformInterceptor`:
 
 ```json
 {
@@ -213,7 +259,7 @@ Success response:
 }
 ```
 
-Error response:
+Errors are normalized by `GlobalExceptionFilter`:
 
 ```json
 {
@@ -230,126 +276,311 @@ Error response:
 }
 ```
 
-## Auth, Roles, and Premium Access
+Operational notes:
 
-- Global auth is enforced by `JwtAuthGuard`.
-- `@Public()` routes are explicitly open.
-- Admin routes require `role=admin`.
-- `GET /frames/:id/svg` behavior:
-  - free frame: public access
-  - premium frame:
-    - admin JWT allowed
-    - or user JWT with `subscriptionActive=true`
-    - otherwise `401`/`403`
+- `x-request-id` is accepted from the caller or generated automatically.
+- Swagger is mounted at `/api/docs`.
+- `GET /health/jwt-test` is a diagnostic route intended for development checks.
 
-## Frame Asset Upload Workflow
+## Endpoint Map
 
-Endpoint:
+All routes below are relative to `${API_PREFIX}` unless noted otherwise.
 
-- `POST /api/v1/admin/frames/:id/assets`
+### Health
 
-Pipeline:
+- `GET /health`
+- `GET /health/jwt-test`
 
-1. Validate file presence and max size (5 MB)
-2. Parse and sanitize SVG (strip risky tags/attrs/external refs)
-3. Upload sanitized original SVG to object storage
-4. Generate PNG thumbnails (150/300/600)
-5. Upload thumbnails
-6. Persist `frame_assets` rows
-7. Update frame `svgUrl` and `thumbnailUrl`
-8. Invalidate frame cache
+### Auth
 
-Example upload:
+- `POST /auth/google`
+- `POST /auth/apple`
+- `POST /auth/refresh`
+- `GET /auth/me`
+- `PUT /auth/me`
+- `DELETE /auth/me`
+- `POST /auth/logout`
+- `POST /auth/logout-all`
+- `GET /auth/sessions`
+- `DELETE /auth/sessions/:sessionId`
 
-```bash
-curl -X POST "http://localhost:8000/api/v1/admin/frames/<frame-id>/assets" \
-  -H "Authorization: Bearer <admin_jwt>" \
-  -F "file=@sample-svgs/abstract.svg;type=image/svg+xml"
-```
+### Public And User Frame Routes
 
-## Sample SVG Overlays
+- `GET /frames`
+- `GET /frames/popular`
+- `GET /frames/saved`
+- `GET /frames/slug/:slug`
+- `GET /frames/:id`
+- `GET /frames/:id/svg`
+- `GET /frames/:id/editor-preview`
+- `POST /frames/:id/apply`
+- `POST /frames/:id/save`
+- `DELETE /frames/:id/save`
+- `GET /frames/categories`
+- `GET /frames/categories/:slug`
+- `GET /frames/tags`
 
-`sample-svgs/` includes 10 portrait upload-ready overlays:
+### Frame Admin
 
-- `abstract.svg`
-- `birthday.svg`
-- `graduation.svg`
-- `holiday.svg`
-- `movement.svg`
-- `nature.svg`
-- `political.svg`
-- `religion.svg`
-- `sports.svg`
-- `wedding.svg`
+- `POST /admin/frames`
+- `PUT /admin/frames/:id`
+- `DELETE /admin/frames/:id`
+- `POST /admin/frames/:id/assets`
+- `POST /admin/frames/categories`
+- `GET /admin/frames/categories`
+- `PUT /admin/frames/categories/:id`
+- `DELETE /admin/frames/categories/:id`
+- `POST /admin/frames/tags`
+- `GET /admin/frames/tags`
+- `PUT /admin/frames/tags/:id`
+- `DELETE /admin/frames/tags/:id`
 
-Each file is designed as a frame overlay with transparent center window suitable for asset upload testing.
+### User Image Routes
 
-## Testing and Performance
+- `POST /images/upload-url`
+- `POST /images/:id/complete`
+- `GET /images/upload-sessions/:id`
+- `POST /images/upload-sessions/:id/cancel`
+- `GET /images/storage`
+- `POST /images/batch`
+- `GET /images`
+- `GET /images/:id`
+- `GET /images/:id/processing-status`
+- `PATCH /images/:id`
+- `POST /images/:id/reprocess`
+- `DELETE /images/:id`
 
-Unit/integration:
+### Image Admin
 
-```bash
-npm run test
-npm run test:e2e
-npm run test:cov
-```
+- `GET /admin/images/stats`
+- `POST /admin/images/:id/reprocess`
+- `DELETE /admin/images/:id/hard`
+- `GET /admin/images/orphaned`
+- `POST /admin/images/cleanup`
 
-Lint/build:
+## Frame Catalog And Asset Workflow
 
-```bash
-npm run lint:check
-npm run build
-```
+Frame authoring is metadata-first:
 
-Performance (k6):
+1. Admin creates a frame record with dimensions, aspect ratio, orientation, premium flags, sort order, and optional `metadata.imagePlacement`.
+2. Admin uploads an SVG asset.
+3. The API sanitizes the SVG, rejects risky markup, validates the canvas aspect ratio against the frame record, and stores the cleaned SVG.
+4. The API generates:
+   - thumbnail small, medium, and large PNGs
+   - editor preview PNG
+   - `FrameAsset` rows for each stored asset
+5. The frame entity is updated with `svgUrl`, `thumbnailUrl`, and `editorPreviewUrl`.
 
-```bash
-npm run perf:frames:list
-```
+Important behavior:
 
-This uses `test/perf/run-frames-list.ps1` and `test/perf/frames-list.k6.js`.
+- Frame detail payloads hide premium raw asset URLs from public detail responses.
+- Premium raw access is routed through guarded endpoints instead.
+- `metadata.imagePlacement` defines the normalized photo window used later by image compositing.
+
+## Image Upload, Processing, And Editing Workflow
+
+### 1. Upload session creation
+
+- `POST /images/upload-url`
+- validates MIME type and declared file size
+- checks the user's daily upload limit from upload-session records
+- optionally validates premium frame eligibility
+- reserves pending quota
+- returns a presigned PUT URL for temporary storage
+
+### 2. Upload completion
+
+- `POST /images/:id/complete`
+- verifies the uploaded object exists and matches expectations
+- detects actual image type server-side
+- verifies optional checksum
+- snapshots the selected frame SVG if a frame was chosen
+- creates the `images` row and marks it `uploaded`
+- queues asynchronous raw processing
+
+### 3. Raw processing worker
+
+- stores the original image as the canonical source object
+- extracts and sanitizes EXIF metadata
+- computes dimensions, aspect ratio, and orientation
+- generates raw variants such as `thumbnail`, `medium`, `large`, and `panoramic_preview` for eligible 360 images
+- updates quota accounting for created variants
+- queues framed render prewarm when an active frame snapshot exists
+
+### 4. Staged edit model
+
+- `PATCH /images/:id` can stage a frame change, frame removal, or transform change
+- staged edits do not replace the active frame render immediately
+- `frameRenderStatus` communicates whether the image is ready, has no frame, or needs reprocess
+
+### 5. Promotion and prewarm
+
+- `POST /images/:id/reprocess` promotes staged changes
+- promotion increments `activeRenderRevision`
+- framed render prewarm is queued after promotion
+
+See [the dedicated hybrid rendering document](./docs/hybrid-image-frame-rendering.md) for the full data flow and state model.
+
+## The Hybrid Rendering Strategy
+
+The image system deliberately keeps two representations alive:
+
+- Canonical raw outputs: original plus standard raw variants produced by the image worker.
+- Derived framed outputs: revisioned composited variants produced only when a frame is active.
+
+Why this matters:
+
+- the system can always fall back to raw variants if framed renders are missing
+- frame edits can be staged and promoted safely
+- old framed revisions can be cleaned without touching the original image
+- clients can rehydrate the editor with `renderTransform`, `pendingRenderTransform`, and `activeRenderRevision`
+
+## Background Jobs, Cron, And Warmups
+
+### BullMQ jobs
+
+- `process-image`: generate raw image variants after upload completion
+- `prewarm-frame-render`: generate framed variants for the active revision
+
+### Scheduled tasks
+
+- every 10 minutes: expire upload sessions and reclaim pending quota
+- every 15 minutes: requeue stalled uploaded images
+- every 15 minutes: sync frame popularity counters from Redis into PostgreSQL
+- daily at 2 AM: hard-delete expired soft-deleted images and clean stale framed render variants
+- daily at 3 AM: reconcile per-user storage quota against actual stored bytes
+
+### Startup behavior
+
+- frame taxonomy and popular frame caches are warmed on application bootstrap
+- development startup auto-runs pending migrations unless disabled
+
+## Caching And Counters
+
+Redis is used for more than simple response caching:
+
+- frame detail, frame lists, categories, tags, and popular-frame caches
+- processing-status cache plus image invalidation/version helpers
+- frame popularity sorted sets:
+  - `popular:frames:views`
+  - `popular:frames:applies`
+- render generation locks to avoid duplicate framed variant work
+
+The cache layer is tolerant of Redis failures; cache misses degrade to database or storage reads instead of taking the API down.
+
+## Scripts And Commands
+
+### Core runtime
+
+- `npm run start:dev`
+- `npm run build`
+- `npm run start:prod`
+
+### Database
+
+- `npm run migration:show`
+- `npm run migration:run`
+- `npm run migration:revert`
+
+### Testing
+
+- `npm test`
+- `npm run test:e2e`
+- `npm run lint:check`
+- `npm run format:check`
+
+### Utilities
+
+- `npm run keys:generate`
+- `npm run frames:generate-svgs`
+- `npm run frames:repair-samples`
+- `npm run perf:frames:list`
+
+## Testing Strategy
+
+The repo already has focused coverage for:
+
+- auth login, refresh, and session flows
+- frame browsing, premium access, admin CRUD, and asset upload
+- full image upload, frame staging, transform staging, reprocess, and render exposure flows
+- render math and frame metadata utilities
+
+Relevant suites live in:
+
+- `test/auth.e2e-spec.ts`
+- `test/frames.e2e-spec.ts`
+- `test/frames-flow.e2e-spec.ts`
+- `test/frames-admin.e2e-spec.ts`
+- `test/images-flow.e2e-spec.ts`
+- `src/images/utils/__tests__`
+- `src/frames/services/__tests__`
+- `src/frames/utils/__tests__`
 
 ## Troubleshooting
 
-### 1) `STORAGE_UPLOAD_FAILED` on `/admin/frames/:id/assets`
+### API fails at startup because keys are missing
 
-Check MinIO reachability and ports:
-
-- `docker compose ps`
-- Ensure `frame-minio` shows `0.0.0.0:9000-9001->9000-9001/tcp`
-- Health check: `http://localhost:9000/minio/health/live`
-
-If ports are missing (stale container), recreate:
+Run:
 
 ```bash
-docker compose up -d --force-recreate minio minio-init
+npm run keys:generate
 ```
 
-### 2) `(0 , sharp_1.default) is not a function`
+Then verify `JWT_PRIVATE_KEY_PATH` and `JWT_PUBLIC_KEY_PATH`.
 
-Cause: stale runtime build/import mismatch for `sharp`.
+### A frame query fails with a missing database column
 
-Fix:
+Check migration state:
 
-- ensure service imports `sharp` correctly (`import sharp = require('sharp')`)
-- restart API after code update
+```bash
+npm run migration:show
+```
 
-### 3) `FRAME_NOT_FOUND` with message `Frame asset is not available.`
+Development mode auto-runs pending migrations by default, but stale shells or alternate databases can still drift.
 
-The frame exists but `svg_url` is null. Upload assets first via admin endpoint.
+### Upload completion succeeds but processing never finishes
 
-### 4) Redis `NOAUTH Authentication required`
+Check:
 
-Ensure `.env` and compose values match:
+- Redis/queue connectivity
+- worker logs for `ImageProcessingWorker`
+- `GET /images/:id/processing-status`
+- `POST /admin/images/cleanup` for stalled upload recovery
 
-- `REDIS_PORT=6382`
-- `REDIS_PASSWORD=frame_redis_password_dev`
+### Framed image URLs are returning raw variants
 
-### 5) Unexpected route paths
+That usually means one of these is true:
 
-`API_PREFIX` is environment-driven. Recommended local value is `api/v1`.
-If you set `v1`, all paths shift to `/v1/*`.
+- the image has no active frame snapshot
+- the active framed render variant has not been generated yet
+- the system fell back intentionally and queued a prewarm job
 
----
+The behavior is expected in this hybrid model; the dedicated rendering doc explains the fallback path.
 
-If the running behavior differs from this README, check current branch and local uncommitted changes first.
+### Premium frame asset access returns `401` or `403`
+
+- `401`: missing or invalid JWT
+- `403`: authenticated user lacks an active subscription and is not an admin
+
+### Sample frame overlays look wrong after metadata changes
+
+Run:
+
+```bash
+npm run frames:repair-samples
+```
+
+This regenerates the local sample SVG assets used for seeded frame examples.
+
+## Related Files To Read Next
+
+- `src/main.ts`
+- `src/app.module.ts`
+- `src/auth/auth.service.ts`
+- `src/frames/services/frames.service.ts`
+- `src/frames/services/frame-assets.service.ts`
+- `src/images/services/upload.service.ts`
+- `src/images/services/images.service.ts`
+- `src/images/services/image-compositing.service.ts`
+- `src/images/workers/image-processing.worker.ts`
+- `src/images/workers/upload-cleanup.worker.ts`
