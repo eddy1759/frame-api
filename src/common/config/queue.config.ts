@@ -28,11 +28,18 @@ export default registerAs(
   'queue',
   (): QueueConfig => ({
     redis: {
-      host: process.env.REDIS_HOST || 'localhost',
-      port: parseInt(process.env.REDIS_PORT || '6379', 10),
-      password: process.env.REDIS_PASSWORD || undefined,
+      host:
+        process.env.REDIS_QUEUE_HOST || process.env.REDIS_HOST || 'localhost',
+      port: parseInt(
+        process.env.REDIS_QUEUE_PORT || process.env.REDIS_PORT || '6379',
+        10,
+      ),
+      password:
+        process.env.REDIS_QUEUE_PASSWORD ||
+        process.env.REDIS_PASSWORD ||
+        undefined,
       keyPrefix: process.env.REDIS_QUEUE_NAME || 'frame-queue',
-      db: parseInt(process.env.REDIS_DB || '1', 10),
+      db: parseInt(process.env.REDIS_QUEUE_DB || '1', 10),
     },
     defaultJobOptions: {
       attempts: parseInt(process.env.QUEUE_ATTEMPTS || '3', 10),

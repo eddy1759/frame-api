@@ -25,7 +25,7 @@ export default registerAs(
       10,
     ),
     forcePathStyle:
-      process.env.S3_FORCE_PATH_STYLE === 'true' ||
+      process.env.OBJECT_STORAGE_FORCE_PATH_STYLE === 'true' ||
       process.env.NODE_ENV !== 'production',
     useSsl: (process.env.OBJECT_STORAGE_USE_SSL || 'false') === 'true',
     cdnBaseUrl:

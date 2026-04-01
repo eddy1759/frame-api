@@ -63,6 +63,10 @@ class EnvironmentVariables {
   @IsOptional()
   DB_POOL_MIN: number = 5;
 
+  @IsBoolean()
+  @IsOptional()
+  DB_AUTO_RUN_MIGRATIONS?: boolean;
+
   // Redis
   @IsString()
   @IsNotEmpty()
@@ -74,6 +78,26 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   REDIS_PASSWORD?: string;
+
+  @IsOptional()
+  @IsString()
+  REDIS_QUEUE_HOST?: string;
+
+  @IsOptional()
+  @IsNumber()
+  REDIS_QUEUE_PORT?: number;
+
+  @IsOptional()
+  @IsString()
+  REDIS_QUEUE_PASSWORD?: string;
+
+  @IsOptional()
+  @IsNumber()
+  REDIS_QUEUE_DB?: number = 1;
+
+  @IsOptional()
+  @IsString()
+  REDIS_QUEUE_NAME?: string = 'frame-queue';
 
   // JWT
   @IsString()
@@ -160,6 +184,41 @@ class EnvironmentVariables {
   @IsString()
   @IsNotEmpty()
   CDN_BASE_URL: string = 'http://localhost:9000/frame-assets';
+
+  @IsNumber()
+  PRESIGNED_URL_EXPIRY: number = 3600;
+
+  @IsNumber()
+  IMAGE_MAX_SIZE: number = 52428800;
+
+  @IsNumber()
+  IMAGE_DAILY_UPLOAD_LIMIT: number = 100;
+
+  @IsNumber()
+  IMAGE_DEFAULT_STORAGE_LIMIT: number = 5368709120;
+
+  @IsNumber()
+  IMAGE_SOFT_DELETE_GRACE_DAYS: number = 30;
+
+  @IsOptional()
+  @IsNumber()
+  QUEUE_ATTEMPTS?: number = 3;
+
+  @IsOptional()
+  @IsNumber()
+  QUEUE_BACKOFF_DELAY?: number = 3000;
+
+  @IsOptional()
+  @IsNumber()
+  QUEUE_REMOVE_ON_COMPLETE_AGE?: number = 86400;
+
+  @IsOptional()
+  @IsNumber()
+  QUEUE_REMOVE_ON_COMPLETE_COUNT?: number = 1000;
+
+  @IsOptional()
+  @IsNumber()
+  QUEUE_REMOVE_ON_FAIL_AGE?: number = 86400;
 }
 
 export function validate(
