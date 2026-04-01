@@ -81,6 +81,13 @@ export class User {
   storageLimit: number;
 
   @Column({
+    name: 'subscription_active',
+    type: 'boolean',
+    default: false,
+  })
+  subscriptionActive: boolean;
+
+  @Column({
     name: 'last_login_at',
     type: 'timestamptz',
     nullable: true,

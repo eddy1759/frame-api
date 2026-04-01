@@ -20,6 +20,9 @@ export class UserStorageQuota {
   @Column({ name: 'used_bytes', type: 'bigint', default: 0 })
   usedBytes: number;
 
+  @Column({ name: 'pending_bytes', type: 'bigint', default: 0 })
+  pendingBytes: number;
+
   @Column({ name: 'image_count', type: 'int', default: 0 })
   imageCount: number;
 

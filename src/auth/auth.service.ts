@@ -244,7 +244,7 @@ export class AuthService {
       email: user.email,
       type: 'access',
       role: user.role,
-      subscriptionActive: false,
+      subscriptionActive: user.subscriptionActive,
     };
 
     const accessToken: string = this.jwtService.sign(accessPayload, {
@@ -257,7 +257,7 @@ export class AuthService {
       email: user.email,
       type: 'refresh',
       role: user.role,
-      subscriptionActive: false,
+      subscriptionActive: user.subscriptionActive,
       jti: tokenId,
       family: familyId,
     };
@@ -714,7 +714,7 @@ export class AuthService {
       avatarUrl: user.avatarUrl,
       status: user.status,
       role: user.role,
-      subscriptionActive: false,
+      subscriptionActive: user.subscriptionActive,
       storageUsed: user.storageUsed,
       storageLimit: user.storageLimit,
       createdAt: user.createdAt,

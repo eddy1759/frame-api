@@ -41,6 +41,7 @@ describe('AuthService', () => {
     avatarUrl: null,
     status: UserStatus.ACTIVE,
     role: UserRole.USER,
+    subscriptionActive: false,
     storageUsed: 0,
     storageLimit: 5368709120,
     createdAt: new Date('2026-01-01T00:00:00.000Z'),

@@ -12,7 +12,9 @@ import {
   redisConfig,
   jwtConfig,
   throttleConfig,
+  queueConfig,
   storageConfig,
+  imageConfig,
   validate,
 } from './common/config';
 import { JwtConfig } from './common/config/jwt.config';
@@ -34,7 +36,9 @@ import { ImagesModule } from './images/images.module';
         redisConfig,
         jwtConfig,
         throttleConfig,
+        queueConfig,
         storageConfig,
+        imageConfig,
       ],
       validate,
       envFilePath: ['.env'],
