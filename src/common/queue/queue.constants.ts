@@ -4,6 +4,7 @@ export const IMAGE_CLEANUP_QUEUE = 'image-cleanup';
 export enum ImageProcessingJobType {
   PROCESS_IMAGE = 'process-image',
   REPROCESS_IMAGE = 'reprocess-image',
+  PREWARM_FRAME_RENDER = 'prewarm-frame-render',
 }
 
 export enum ImageCleanupJobType {
@@ -15,10 +16,12 @@ export enum ImageCleanupJobType {
 export interface ImageProcessingJobData {
   imageId: string;
   userId: string;
-  storageKey: string;
-  mimeType: string;
-  is360: boolean;
+  tmpStorageKey?: string;
+  storageKey?: string;
+  mimeType?: string;
+  is360?: boolean;
   requestedAt: string;
+  renderRevision?: number;
 }
 
 export interface ImageCleanupJobData {
