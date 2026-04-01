@@ -29,6 +29,8 @@
     "migration:show": "npm run typeorm -- migration:show -d src/common/config/typeorm-cli.config.ts",
     "seed": "ts-node src/database/seeds/run-seed.ts",
     "keys:generate": "ts-node scripts/generate-keys.ts",
+    "frames:generate-svgs": "ts-node -r tsconfig-paths/register scripts/generate-category-frame-svgs.ts",
+    "frames:repair-samples": "ts-node -r tsconfig-paths/register scripts/repair-sample-frame-assets.ts",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "prepare": "husky",
