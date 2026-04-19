@@ -46,6 +46,7 @@ module.exports = {
         'ci', // CI/CD
         'frame', // Core framework changes
         'image', // Image processing
+        'album', // Album management
       ],
     ],
     'scope-case': [2, 'always', 'lower-case'],
