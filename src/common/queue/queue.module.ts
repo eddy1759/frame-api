@@ -1,7 +1,11 @@
 import { Module, Global } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { IMAGE_CLEANUP_QUEUE, IMAGE_PROCESSING_QUEUE } from './queue.constants';
+import {
+  ALBUM_EVENTS_QUEUE,
+  IMAGE_CLEANUP_QUEUE,
+  IMAGE_PROCESSING_QUEUE,
+} from './queue.constants';
 
 @Global()
 @Module({
@@ -25,6 +29,9 @@ import { IMAGE_CLEANUP_QUEUE, IMAGE_PROCESSING_QUEUE } from './queue.constants';
       },
       {
         name: IMAGE_CLEANUP_QUEUE,
+      },
+      {
+        name: ALBUM_EVENTS_QUEUE,
       },
     ),
   ],

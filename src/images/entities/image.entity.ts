@@ -23,6 +23,7 @@ import type { RenderTransformV1 } from '../utils/render-transform.util';
 @Index('idx_image_frame', ['frameId'])
 @Index('idx_image_pending_frame', ['pendingFrameId'])
 @Index('idx_image_processing_status', ['processingStatus'])
+@Index('idx_image_album', ['albumId'])
 @Index('idx_image_storage_key', ['storageKey'], { unique: true })
 export class Image {
   @PrimaryGeneratedColumn('uuid')
@@ -33,6 +34,9 @@ export class Image {
 
   @Column({ name: 'frame_id', type: 'uuid', nullable: true })
   frameId: string | null;
+
+  @Column({ name: 'album_id', type: 'uuid', nullable: true })
+  albumId: string | null;
 
   @Column({
     name: 'frame_snapshot_key',

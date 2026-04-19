@@ -24,6 +24,7 @@ import { HealthModule } from './health/health.module';
 import { AuthModule } from './auth/auth.module';
 import { SharedModule } from './common/shared.module';
 import { FramesModule } from './frames/frames.module';
+import { AlbumsModule } from './albums/albums.module';
 import { QueueModule } from './common/queue/queue.module';
 import { ImagesModule } from './images/images.module';
 
@@ -82,6 +83,7 @@ import { ImagesModule } from './images/images.module';
     HealthModule,
     AuthModule,
     FramesModule,
+    AlbumsModule,
     QueueModule,
     ImagesModule,
   ],

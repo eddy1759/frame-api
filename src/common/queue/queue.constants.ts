@@ -1,5 +1,6 @@
 export const IMAGE_PROCESSING_QUEUE = 'image-processing';
 export const IMAGE_CLEANUP_QUEUE = 'image-cleanup';
+export const ALBUM_EVENTS_QUEUE = 'album-events';
 
 export enum ImageProcessingJobType {
   PROCESS_IMAGE = 'process-image',
@@ -11,6 +12,12 @@ export enum ImageCleanupJobType {
   EXPIRE_SESSIONS = 'expire-sessions',
   HARD_DELETE = 'hard-delete',
   RECONCILE_QUOTA = 'reconcile-quota',
+}
+
+export enum AlbumEventJobType {
+  IMAGE_ADDED = 'album.image.added',
+  ANALYTICS_UPDATE = 'album.analytics.update',
+  INDEX_UPDATE = 'album.index.update',
 }
 
 export interface ImageProcessingJobData {
@@ -30,4 +37,22 @@ export interface ImageCleanupJobData {
   imageId?: string;
   userId?: string;
   storageKeys?: string[];
+}
+
+export interface AlbumImageAddedJobData {
+  albumId: string;
+  imageId: string;
+  frameId: string;
+  userId: string;
+  imageRenderRevision: number;
+}
+
+export interface AlbumAnalyticsJobData {
+  albumId: string;
+  metric: 'view' | 'share';
+}
+
+export interface AlbumIndexUpdateJobData {
+  albumId?: string;
+  reason?: 'album-created' | 'album-item-added';
 }

@@ -6,6 +6,7 @@ import {
   IsUUID,
   IsBoolean,
   IsIn,
+  Matches,
   MaxLength,
   Min,
   Max,
@@ -51,6 +52,15 @@ export class RequestUploadUrlDto {
   @IsOptional()
   @IsUUID()
   frameId?: string;
+
+  @ApiPropertyOptional({
+    example: '3mH8cQpL',
+    description:
+      'Optional public album short code. When supplied, the upload is attached to that album and inherits its frame.',
+  })
+  @IsOptional()
+  @Matches(/^[1-9A-HJ-NP-Za-km-z]{8}$/)
+  albumShortCode?: string;
 
   @ApiPropertyOptional({
     default: false,

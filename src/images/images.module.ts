@@ -3,6 +3,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
+import { Album } from '../albums/entities/album.entity';
+import { AlbumItem } from '../albums/entities/album-item.entity';
 import { FramesModule } from '../frames/frames.module';
 
 // Entities
@@ -33,6 +35,7 @@ import { UploadCleanupService } from './workers/upload-cleanup.worker';
 
 // Constants
 import {
+  ALBUM_EVENTS_QUEUE,
   IMAGE_PROCESSING_QUEUE,
   IMAGE_CLEANUP_QUEUE,
 } from '../common/queue/queue.constants';
@@ -42,6 +45,8 @@ import {
     ConfigModule,
     FramesModule,
     TypeOrmModule.forFeature([
+      Album,
+      AlbumItem,
       Image,
       ImageVariant,
       ImageRenderVariant,
@@ -49,6 +54,7 @@ import {
       UserStorageQuota,
     ]),
     BullModule.registerQueue(
+      { name: ALBUM_EVENTS_QUEUE },
       { name: IMAGE_PROCESSING_QUEUE },
       { name: IMAGE_CLEANUP_QUEUE },
     ),

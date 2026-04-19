@@ -3,6 +3,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { Queue } from 'bullmq';
+import { AlbumItem } from '../../albums/entities/album-item.entity';
 import { In, LessThan, MoreThan, Repository } from 'typeorm';
 import {
   IMAGE_PROCESSING_QUEUE,
@@ -27,6 +28,8 @@ export class UploadCleanupService {
   constructor(
     @InjectRepository(UploadSession)
     private readonly uploadSessionRepository: Repository<UploadSession>,
+    @InjectRepository(AlbumItem)
+    private readonly albumItemRepository: Repository<AlbumItem>,
     @InjectRepository(Image)
     private readonly imageRepository: Repository<Image>,
     @InjectRepository(ImageRenderVariant)
@@ -276,26 +279,38 @@ export class UploadCleanupService {
 
     for (const image of images) {
       try {
+        const referencedAlbumItems = await this.albumItemRepository.find({
+          where: { imageId: image.id },
+          select: ['imageRenderRevision'],
+        });
+        const protectedRevisions = new Set(
+          referencedAlbumItems.map((item) => item.imageRenderRevision),
+        );
         const staleVariants = await this.imageRenderVariantRepository.find({
           where: {
             imageId: image.id,
             renderRevision: LessThan(image.activeRenderRevision),
           },
         });
+        const deletableVariants = staleVariants.filter(
+          (variant) => !protectedRevisions.has(variant.renderRevision),
+        );
 
-        if (staleVariants.length === 0) {
+        if (deletableVariants.length === 0) {
           continue;
         }
 
-        const storageKeys = staleVariants.map((variant) => variant.storageKey);
-        const totalBytes = staleVariants.reduce(
+        const storageKeys = deletableVariants.map(
+          (variant) => variant.storageKey,
+        );
+        const totalBytes = deletableVariants.reduce(
           (sum, variant) => sum + Number(variant.fileSize),
           0,
         );
 
         await this.storageService.deleteObjects(storageKeys);
         await this.imageRenderVariantRepository.delete(
-          staleVariants.map((variant) => variant.id),
+          deletableVariants.map((variant) => variant.id),
         );
 
         if (totalBytes > 0) {
@@ -305,7 +320,7 @@ export class UploadCleanupService {
           );
         }
 
-        deletedCount += staleVariants.length;
+        deletedCount += deletableVariants.length;
       } catch (error) {
         this.logger.error(
           `Failed to clean stale render variants for ${image.id}: ${

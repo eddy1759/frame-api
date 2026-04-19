@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-import { Processor, WorkerHost } from '@nestjs/bullmq';
+import { InjectQueue, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Job } from 'bullmq';
+import { Job, Queue } from 'bullmq';
 import sharp = require('sharp');
 import * as exifr from 'exifr';
 import { ConfigService } from '@nestjs/config';
@@ -20,6 +20,9 @@ import { ImagesCacheService } from '../services/images-cache.service';
 import { StorageQuotaService } from '../services/storage-quota.service';
 import { StorageService } from '../../common/services/storage.service';
 import {
+  ALBUM_EVENTS_QUEUE,
+  AlbumEventJobType,
+  AlbumImageAddedJobData,
   IMAGE_PROCESSING_QUEUE,
   ImageProcessingJobData,
 } from '../../common/queue/queue.constants';
@@ -39,6 +42,8 @@ export class ImageProcessingWorker extends WorkerHost {
   constructor(
     @InjectRepository(Image)
     private readonly imageRepository: Repository<Image>,
+    @InjectQueue(ALBUM_EVENTS_QUEUE)
+    private readonly albumEventsQueue: Queue,
     private readonly imageVariantService: ImageVariantService,
     private readonly storageQuotaService: StorageQuotaService,
     private readonly imagesCacheService: ImagesCacheService,
@@ -69,6 +74,7 @@ export class ImageProcessingWorker extends WorkerHost {
 
     try {
       await this.imageCompositingService.prewarmActiveRenderVariants(imageId);
+      await this.publishAlbumImageAdded(job.data);
       this.logger.log(`Frame render prewarm completed for ${imageId}`);
     } catch (error) {
       const message =
@@ -394,5 +400,35 @@ export class ImageProcessingWorker extends WorkerHost {
     }
 
     return Object.keys(exifData).length >= 0;
+  }
+
+  private async publishAlbumImageAdded(
+    jobData: ImageProcessingJobData,
+  ): Promise<void> {
+    const image = await this.imageRepository.findOne({
+      where: { id: jobData.imageId },
+      select: ['id', 'albumId', 'frameId', 'userId', 'activeRenderRevision'],
+    });
+
+    if (!image?.albumId || !image.frameId) {
+      return;
+    }
+
+    const payload: AlbumImageAddedJobData = {
+      albumId: image.albumId,
+      imageId: image.id,
+      frameId: image.frameId,
+      userId: image.userId,
+      imageRenderRevision: jobData.renderRevision ?? image.activeRenderRevision,
+    };
+
+    if (payload.imageRenderRevision < 1) {
+      return;
+    }
+
+    await this.albumEventsQueue.add(AlbumEventJobType.IMAGE_ADDED, payload, {
+      jobId: `album-add-${payload.albumId}-${payload.imageId}`,
+      priority: 2,
+    });
   }
 }

@@ -9,6 +9,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { DataSource, Repository } from 'typeorm';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const sharp: typeof import('sharp') = require('sharp');
+import { Album } from '../../albums/entities/album.entity';
 import { User } from '../../auth/entities/user.entity';
 import { BusinessException } from '../../common/filters/business.exception';
 import { StorageService } from '../../common/services/storage.service';
@@ -33,6 +34,8 @@ export class UploadService {
   private readonly logger = new Logger(UploadService.name);
 
   constructor(
+    @InjectRepository(Album)
+    private readonly albumRepository: Repository<Album>,
     @InjectRepository(UploadSession)
     private readonly uploadSessionRepository: Repository<UploadSession>,
     @InjectRepository(Image)
@@ -64,8 +67,24 @@ export class UploadService {
     this.assertAllowedMimeType(dto.mimeType);
     this.assertAllowedFileSize(dto.fileSize);
 
-    if (dto.frameId) {
-      await this.framesService.assertFrameEligibleForImage(dto.frameId, user);
+    const resolvedAlbum = dto.albumShortCode
+      ? await this.resolveAlbum(dto.albumShortCode)
+      : null;
+    const resolvedFrameId = resolvedAlbum?.frameId ?? dto.frameId ?? null;
+
+    if (resolvedAlbum && dto.frameId && dto.frameId !== resolvedAlbum.frameId) {
+      throw new BusinessException(
+        'ALBUM_FRAME_MISMATCH',
+        'Album uploads must use the album frame.',
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (resolvedFrameId) {
+      await this.framesService.assertFrameEligibleForImage(
+        resolvedFrameId,
+        user,
+      );
     }
 
     const dailyCount = await this.countDailyUploads(user.id);
@@ -95,7 +114,8 @@ export class UploadService {
     const session = this.uploadSessionRepository.create({
       id: uuid,
       userId: user.id,
-      frameId: dto.frameId ?? null,
+      frameId: resolvedFrameId,
+      albumId: resolvedAlbum?.id ?? null,
       originalFilename: this.sanitizeFilename(dto.filename),
       mimeType: dto.mimeType,
       expectedFileSize: dto.fileSize,
@@ -310,6 +330,7 @@ export class UploadService {
         const image = manager.getRepository(Image).create({
           id: lockedSession.id,
           userId: lockedSession.userId,
+          albumId: lockedSession.albumId,
           frameId: frameState.frameId,
           frameSnapshotKey: frameState.frameSnapshotKey,
           frameSnapshotSize: frameState.frameSnapshotSize,
@@ -673,5 +694,30 @@ export class UploadService {
   private sanitizeFilename(filename: string): string {
     const cleaned = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
     return cleaned.substring(0, 255);
+  }
+
+  private async resolveAlbum(shortCode: string): Promise<Album> {
+    const album = await this.albumRepository.findOne({
+      where: { shortCode },
+      select: ['id', 'frameId', 'isPublic'],
+    });
+
+    if (!album) {
+      throw new BusinessException(
+        'ALBUM_NOT_FOUND',
+        'Album not found.',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    if (!album.isPublic) {
+      throw new BusinessException(
+        'ALBUM_NOT_PUBLIC',
+        'Album is not accepting public contributions.',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    return album;
   }
 }

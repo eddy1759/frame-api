@@ -10,6 +10,7 @@ import { UploadSessionStatus } from '../types/image.types';
 @Entity('upload_sessions')
 @Index('idx_upload_session_user', ['userId'])
 @Index('idx_upload_session_status', ['status'])
+@Index('idx_upload_session_album', ['albumId'])
 @Index('idx_upload_session_storage_key', ['storageKey'], { unique: true })
 export class UploadSession {
   @PrimaryGeneratedColumn('uuid')
@@ -20,6 +21,9 @@ export class UploadSession {
 
   @Column({ name: 'frame_id', type: 'uuid', nullable: true })
   frameId: string | null;
+
+  @Column({ name: 'album_id', type: 'uuid', nullable: true })
+  albumId: string | null;
 
   @Column({ name: 'original_filename', type: 'varchar', length: 255 })
   originalFilename: string;
