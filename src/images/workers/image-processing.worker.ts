@@ -129,7 +129,11 @@ export class ImageProcessingWorker extends WorkerHost {
       }
 
       if (sourceKey !== storageKey) {
-        await this.storageService.copyObject(sourceKey, storageKey);
+        await this.storageService.putObject(
+          storageKey,
+          originalBuffer,
+          mimeType,
+        );
       }
 
       await this.imageVariantService.createVariant({
