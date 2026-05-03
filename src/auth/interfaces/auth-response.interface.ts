@@ -1,4 +1,4 @@
-import { TokenPair } from './token-pair.interface';
+﻿import { TokenPair } from './token-pair.interface';
 
 export interface SanitizedUser {
   id: string;
@@ -6,6 +6,8 @@ export interface SanitizedUser {
   displayName: string | null;
   avatarUrl: string | null;
   status: string;
+  role: string;
+  subscriptionActive: boolean;
   storageUsed: number;
   storageLimit: number;
   createdAt: Date;

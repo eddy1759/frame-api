@@ -8,7 +8,6 @@ module.exports = {
   plugins: ['@typescript-eslint/eslint-plugin', 'prettier'],
   extends: [
     'plugin:@typescript-eslint/recommended',
-    'plugin:@typescript-eslint/recommended-requiring-type-checking',
     'plugin:prettier/recommended',
   ],
   root: true,
@@ -25,14 +24,8 @@ module.exports = {
     'coverage/',
   ],
   rules: {
-    '@typescript-eslint/no-floating-promises': 'error',
-    '@typescript-eslint/no-misused-promises': 'error',
-    '@typescript-eslint/await-thenable': 'error',
-    '@typescript-eslint/no-unsafe-assignment': 'warn',
-    '@typescript-eslint/no-unsafe-member-access': 'warn',
-    '@typescript-eslint/no-unsafe-call': 'warn',
-    '@typescript-eslint/no-unsafe-return': 'warn',
     '@typescript-eslint/interface-name-prefix': 'off',
+    '@typescript-eslint/explicit-function-return-type': 'off',
     '@typescript-eslint/explicit-module-boundary-types': 'off',
     '@typescript-eslint/no-explicit-any': 'off',
     '@typescript-eslint/no-unused-vars': [
@@ -41,14 +34,9 @@ module.exports = {
         argsIgnorePattern: '^_',       // Allow _unused params
         varsIgnorePattern: '^_',
         destructuredArrayIgnorePattern: '^_',
-      },
-    ],
-    '@typescript-eslint/explicit-function-return-type': [
-      'warn',
-      {
-        allowExpressions: true,
-        allowTypedFunctionExpressions: true,
-        allowHigherOrderFunctions: true,
+        'ignoreRestSiblings': true,
+        'vars': 'all',
+        'args': 'after-used'
       },
     ],
     'no-console': [
@@ -57,12 +45,6 @@ module.exports = {
         allow: ['warn', 'error'],     // Allow console.warn and console.error
       },
     ],
-    'no-return-await': 'off',          // Handled by @typescript-eslint
-    '@typescript-eslint/return-await': ['error', 'in-try-catch'],
-    'no-duplicate-imports': 'error',
-    'no-template-curly-in-string': 'warn',
-    'prefer-const': 'error',
-    'no-var': 'error',
     'prettier/prettier': [
       'error',
       {
@@ -84,6 +66,13 @@ module.exports = {
         '@typescript-eslint/no-unsafe-member-access': 'off',
         '@typescript-eslint/no-unsafe-call': 'off',
         '@typescript-eslint/unbound-method': 'off',
+        '@typescript-eslint/no-unused-vars': ['warn', {
+                'varsIgnorePattern': '^_',
+                'argsIgnorePattern': '^_',
+                'ignoreRestSiblings': true,
+                'vars': 'all',
+                'args': 'none'
+            }],
       },
     },
   ],

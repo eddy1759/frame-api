@@ -1,20 +1,27 @@
 import { registerAs } from '@nestjs/config';
+import {
+  RedisConnectionConfig,
+  resolveRedisConnectionConfig,
+} from './redis-connection.util';
 
-export interface RedisConfig {
-  host: string;
-  port: number;
-  password: string | undefined;
-  db: number;
+export interface RedisConfig extends RedisConnectionConfig {
   keyPrefix: string;
 }
 
-export default registerAs(
-  'redis',
-  (): RedisConfig => ({
-    host: process.env.REDIS_HOST || 'localhost',
-    port: parseInt(process.env.REDIS_PORT || '6379', 10),
-    password: process.env.REDIS_PASSWORD || undefined,
-    db: parseInt(process.env.REDIS_DB || '0', 10),
+export default registerAs('redis', (): RedisConfig => {
+  const connection = resolveRedisConnectionConfig({
+    url: process.env.REDIS_URL,
+    host: process.env.REDIS_HOST,
+    port: process.env.REDIS_PORT,
+    password: process.env.REDIS_PASSWORD,
+    db: process.env.REDIS_DB,
+    fallbackHost: 'localhost',
+    fallbackPort: 6379,
+    fallbackDb: 0,
+  });
+
+  return {
+    ...connection,
     keyPrefix: 'frame:',
-  }),
-);
+  };
+});

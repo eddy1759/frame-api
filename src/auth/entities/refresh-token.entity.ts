@@ -1,5 +1,3 @@
-// src/auth/entities/refresh-token.entity.ts
-
 import {
   Entity,
   PrimaryGeneratedColumn,

@@ -1,8 +1,10 @@
+/* eslint-disable @typescript-eslint/require-await */
 import { Controller, Get, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { DataSource } from 'typeorm';
-import { RedisService } from '../common/redis/redis.service';
 import { JwtService } from '@nestjs/jwt';
+import { DataSource } from 'typeorm';
+import { Public } from '../auth/decorators/public.decorator';
+import { RedisService } from '../common/redis/redis.service';
 
 @ApiTags('Health')
 @Controller('health')
@@ -15,6 +17,7 @@ export class HealthController {
     private readonly jwtService: JwtService,
   ) {}
 
+  @Public()
   @Get()
   @ApiOperation({ summary: 'Health check' })
   @ApiResponse({ status: 200, description: 'Service is healthy' })
@@ -25,7 +28,6 @@ export class HealthController {
   }> {
     const services: Record<string, string> = {};
 
-    // Check PostgreSQL
     try {
       await this.dataSource.query('SELECT 1');
       services.database = 'healthy';
@@ -34,7 +36,6 @@ export class HealthController {
       this.logger.error('Database health check failed', error);
     }
 
-    // Check Redis
     try {
       const pong = await this.redisService.ping();
       services.redis = pong ? 'healthy' : 'unhealthy';
@@ -52,7 +53,7 @@ export class HealthController {
     };
   }
 
-  // add a temporary JWT test endpoint for development purposes to verify that JWT signing and verification works correctly. This can be removed in production.
+  @Public()
   @Get('jwt-test')
   @ApiOperation({ summary: 'Test JWT signing & verification (DEV ONLY)' })
   async jwtTest(): Promise<{
@@ -63,15 +64,11 @@ export class HealthController {
     const testPayload = {
       sub: 'test-user-id',
       email: 'test@example.com',
-      type: 'access',
+      type: 'access' as const,
     };
 
-    const token = await this.jwtService.signAsync(testPayload, {
-      expiresIn: 60,
-    });
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-    const decoded = await this.jwtService.verifyAsync(token);
+    const token = this.jwtService.sign(testPayload, { expiresIn: 60 });
+    const decoded = this.jwtService.verify(token);
 
     return {
       signed: !!token,

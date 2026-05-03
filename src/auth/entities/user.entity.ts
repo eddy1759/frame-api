@@ -1,4 +1,4 @@
-import {
+﻿import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -11,6 +11,7 @@ import {
 import { OAuthAccount } from './oauth-account.entity';
 import { RefreshToken } from './refresh-token.entity';
 import { UserStatus } from '../enums/user-status.enum';
+import { UserRole } from '../enums/user-role.enum';
 
 @Entity('users')
 export class User {
@@ -41,6 +42,15 @@ export class User {
   })
   avatarUrl: string | null;
 
+  @Column({
+    name: 'password_hash',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+    select: false,
+  })
+  passwordHash?: string | null;
+
   @Index('idx_users_status')
   @Column({
     type: 'varchar',
@@ -48,6 +58,14 @@ export class User {
     default: UserStatus.ACTIVE,
   })
   status: UserStatus;
+
+  @Index('idx_users_role')
+  @Column({
+    type: 'varchar',
+    length: 20,
+    default: UserRole.USER,
+  })
+  role: UserRole;
 
   @Column({
     name: 'storage_used',
@@ -70,6 +88,13 @@ export class User {
     },
   })
   storageLimit: number;
+
+  @Column({
+    name: 'subscription_active',
+    type: 'boolean',
+    default: false,
+  })
+  subscriptionActive: boolean;
 
   @Column({
     name: 'last_login_at',

@@ -41,6 +41,11 @@ lerna-debug.log*
 .env.test.local
 .env.production.local
 .env.local
+.env.example
+generate_tokens.sh
+seed_users.sh
+signature.bin
+
 
 # temp directory
 .temp

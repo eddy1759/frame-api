@@ -1,27 +1,49 @@
-/* eslint-disable @typescript-eslint/no-unsafe-return */
+﻿/* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { JwtModule } from '@nestjs/jwt';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppService } from './app.service';
 
 import {
   databaseConfig,
   redisConfig,
   jwtConfig,
+  throttleConfig,
+  queueConfig,
+  storageConfig,
+  imageConfig,
+  aiConfig,
   validate,
 } from './common/config';
 import { JwtConfig } from './common/config/jwt.config';
 
 import { RedisModule } from './common/redis/redis.module';
 import { HealthModule } from './health/health.module';
+import { AuthModule } from './auth/auth.module';
+import { SharedModule } from './common/shared.module';
+import { FramesModule } from './frames/frames.module';
+import { AlbumsModule } from './albums/albums.module';
+import { QueueModule } from './common/queue/queue.module';
+import { ImagesModule } from './images/images.module';
+import { AiFramesModule } from './ai-frames/ai-frames.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [databaseConfig, redisConfig, jwtConfig],
+      load: [
+        databaseConfig,
+        redisConfig,
+        jwtConfig,
+        throttleConfig,
+        queueConfig,
+        storageConfig,
+        imageConfig,
+        aiConfig,
+      ],
       validate,
       envFilePath: ['.env'],
     }),
@@ -36,6 +58,7 @@ import { HealthModule } from './health/health.module';
         return dbConfig;
       },
     }),
+    ScheduleModule.forRoot(),
     JwtModule.registerAsync({
       global: true,
       imports: [ConfigModule],
@@ -59,7 +82,14 @@ import { HealthModule } from './health/health.module';
     }),
 
     RedisModule,
+    SharedModule,
     HealthModule,
+    AuthModule,
+    FramesModule,
+    AlbumsModule,
+    QueueModule,
+    ImagesModule,
+    AiFramesModule,
   ],
   controllers: [],
   providers: [AppService],

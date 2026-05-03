@@ -8,7 +8,7 @@ services:
       POSTGRES_USER: frame_user
       POSTGRES_PASSWORD: frame_password_dev
     ports:
-      - '5432:5432'
+      - '5433:5432' # changed from 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -16,21 +16,61 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
   redis:
     image: redis:6.2-alpine
     container_name: frame-redis
     restart: unless-stopped
     ports:
-      - '6379:6379'
-    command: redis-server --appendonly yes
+      - '6382:6379'
+    command: redis-server --appendonly yes --requirepass frame_redis_password_dev --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ['CMD', 'redis-cli', 'ping']
+      test:
+        ['CMD-SHELL', 'redis-cli -a frame_redis_password_dev ping | grep PONG']
       interval: 10s
       timeout: 5s
       retries: 5
 
+  minio:
+    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+    container_name: frame-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ':9001'
+    ports:
+      - '9003:9000' #changed from 9000
+      - '9004:9001' #change from 9001
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-01-17T23-25-50Z
+    container_name: frame-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      sleep 5 &&
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+
+      # Create buckets
+      mc mb local/frame-assets --ignore-existing &&
+
+      # Public access
+      mc anonymous set download local/frame-assets/frames &&
+
+      # Lifecycle rule for temp uploads
+      mc ilm rule add local/frame-assets --prefix 'tmp/' --expire-days 1 || true &&
+
+      echo 'MinIO buckets and lifecycle configured'
+      "
+
 volumes:
   postgres_data:
   redis_data:
+  minio_data:

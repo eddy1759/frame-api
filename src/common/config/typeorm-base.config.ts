@@ -1,5 +1,14 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
+const resolveAutoRunMigrations = (): boolean => {
+  const configured = process.env.DB_AUTO_RUN_MIGRATIONS?.trim();
+  if (configured) {
+    return configured.toLowerCase() === 'true';
+  }
+
+  return (process.env.NODE_ENV ?? 'development') === 'development';
+};
+
 export const baseTypeOrmConfig = (): TypeOrmModuleOptions => {
   if (!process.env.DB_PASSWORD) {
     throw new Error('DB_PASSWORD must be a non-empty string in .env');
@@ -14,6 +23,7 @@ export const baseTypeOrmConfig = (): TypeOrmModuleOptions => {
     database: process.env.DB_NAME,
     entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
     migrations: [__dirname + '/../../database/migrations/*{.ts,.js}'],
+    migrationsRun: resolveAutoRunMigrations(),
     synchronize: false,
     logging: process.env.NODE_ENV === 'development',
   };
