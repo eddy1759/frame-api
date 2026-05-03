@@ -108,13 +108,21 @@ class EnvironmentVariables {
   REDIS_QUEUE_NAME?: string = 'frame-queue';
 
   // JWT
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  JWT_PRIVATE_KEY_PATH: string = '';
+  JWT_PRIVATE_KEY?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  JWT_PUBLIC_KEY_PATH: string = '';
+  JWT_PUBLIC_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  JWT_PRIVATE_KEY_PATH?: string = '';
+
+  @IsOptional()
+  @IsString()
+  JWT_PUBLIC_KEY_PATH?: string = '';
 
   @IsNumber()
   JWT_ACCESS_TOKEN_TTL: number = 3600;
@@ -340,5 +348,34 @@ export function validate(
     );
   }
 
+  validateOptionalJwtPairs(validatedConfig);
+
   return validatedConfig;
+}
+
+function validateOptionalJwtPairs(config: EnvironmentVariables): void {
+  const privateInline = config.JWT_PRIVATE_KEY?.trim();
+  const publicInline = config.JWT_PUBLIC_KEY?.trim();
+  const privatePath = config.JWT_PRIVATE_KEY_PATH?.trim();
+  const publicPath = config.JWT_PUBLIC_KEY_PATH?.trim();
+
+  const messages: string[] = [];
+
+  if ((privateInline && !publicInline) || (!privateInline && publicInline)) {
+    messages.push(
+      'JWT_PRIVATE_KEY and JWT_PUBLIC_KEY must both be provided when using inline JWT key material.',
+    );
+  }
+
+  if ((privatePath && !publicPath) || (!privatePath && publicPath)) {
+    messages.push(
+      'JWT_PRIVATE_KEY_PATH and JWT_PUBLIC_KEY_PATH must both be provided when using file-based JWT keys.',
+    );
+  }
+
+  if (messages.length > 0) {
+    throw new Error(
+      `\n\nEnvironment validation failed:\n${messages.map((message) => `  - ${message}`).join('\n')}\n\nPlease check your .env file.\n`,
+    );
+  }
 }
