@@ -62,7 +62,7 @@ async function bootstrap(): Promise<void> {
   );
 
   //Swagger (non-production only)
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV !== 'test') {
     setupSwagger(app);
     logger.log(`Swagger docs available at /api/docs`);
   }
