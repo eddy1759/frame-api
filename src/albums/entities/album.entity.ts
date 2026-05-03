@@ -8,7 +8,6 @@ import {
   OneToMany,
   OneToOne,
   PrimaryGeneratedColumn,
-  Unique,
   UpdateDateColumn,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
@@ -21,7 +20,6 @@ import { AlbumStats } from './album-stats.entity';
 @Index('idx_album_frame', ['frameId'])
 @Index('idx_album_owner', ['ownerId'])
 @Index('idx_album_public_created', ['isPublic', 'createdAt'])
-@Unique('idx_album_owner_frame', ['ownerId', 'frameId'])
 export class Album {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -32,7 +30,7 @@ export class Album {
   @Column({ type: 'text', nullable: true })
   description: string | null;
 
-  @Column({ name: 'short_code', type: 'varchar', length: 8, unique: true })
+  @Column({ name: 'short_code', type: 'varchar', length: 32, unique: true })
   shortCode: string;
 
   @Column({ name: 'frame_id', type: 'uuid' })

@@ -75,6 +75,12 @@ type ImageRecord = {
   pendingFrameId: string | null;
   frameRenderStatus: FrameRenderStatus;
   activeRenderRevision: number;
+  finalRender: {
+    cdnUrl: string;
+    width: number;
+    height: number;
+    revision: number;
+  } | null;
   renderTransform: {
     version: 1;
     zoom: number;
@@ -514,6 +520,14 @@ describe('Images Upload Flow API (e2e)', () => {
             ? FrameRenderStatus.READY
             : FrameRenderStatus.NONE,
           activeRenderRevision: state.uploadSession.frameId ? 1 : 0,
+          finalRender: state.uploadSession.frameId
+            ? {
+                cdnUrl: `https://signed.example.com/image-renders/${id}/rev-1/large.jpg`,
+                width: 1080,
+                height: 1920,
+                revision: 1,
+              }
+            : null,
           renderTransform: state.uploadSession.frameId
             ? {
                 version: 1,
@@ -704,19 +718,25 @@ describe('Images Upload Flow API (e2e)', () => {
             state.image.pendingFrameId = null;
             state.image.renderTransform = state.image.pendingRenderTransform;
             state.image.pendingRenderTransform = null;
-            state.image.frameRenderStatus = FrameRenderStatus.READY;
+            state.image.frameRenderStatus = FrameRenderStatus.PROCESSING;
             state.image.activeRenderRevision += 1;
-            state.image.thumbnailUrl = `https://signed.example.com/image-renders/${id}/rev-2/thumbnail.jpg`;
+            state.image.processingStatus = ProcessingStatus.PROCESSING;
+            state.image.finalRender = null;
+            state.image.thumbnailUrl = `https://signed.example.com/images/${id}/thumbnail.jpg`;
           } else if (state.image.pendingRenderTransform) {
             state.image.renderTransform = state.image.pendingRenderTransform;
             state.image.pendingRenderTransform = null;
-            state.image.frameRenderStatus = FrameRenderStatus.READY;
+            state.image.frameRenderStatus = FrameRenderStatus.PROCESSING;
             state.image.activeRenderRevision += 1;
+            state.image.processingStatus = ProcessingStatus.PROCESSING;
+            state.image.finalRender = null;
           } else {
             state.image.frameId = null;
             state.image.renderTransform = null;
             state.image.frameRenderStatus = FrameRenderStatus.NONE;
             state.image.activeRenderRevision += 1;
+            state.image.processingStatus = ProcessingStatus.COMPLETED;
+            state.image.finalRender = null;
             state.image.thumbnailUrl = `https://signed.example.com/images/${id}/thumbnail.jpg`;
           }
         }
@@ -725,13 +745,17 @@ describe('Images Upload Flow API (e2e)', () => {
 
         return {
           imageId: id,
+          frameId: state.image.frameId,
           frameRenderStatus: state.image.frameRenderStatus,
           pendingFrameId: state.image.pendingFrameId,
+          activeRenderRevision: state.image.activeRenderRevision,
+          queued:
+            state.image.frameRenderStatus === FrameRenderStatus.PROCESSING,
           message: 'Pending frame change promoted and render refresh queued.',
         };
       },
     );
-    imagesServiceMock.deleteImage.mockResolvedValue(undefined);
+    imagesServiceMock.deleteImage.mockResolvedValue(null);
 
     imageProcessingServiceMock.getProcessingStatus.mockImplementation(
       (id: string, userId: string) => {
@@ -848,6 +872,12 @@ describe('Images Upload Flow API (e2e)', () => {
         expect(res.body.data.pendingFrameId).toBeNull();
         expect(res.body.data.frameRenderStatus).toBe(FrameRenderStatus.READY);
         expect(res.body.data.activeRenderRevision).toBe(1);
+        expect(res.body.data.finalRender).toEqual({
+          cdnUrl: `https://signed.example.com/image-renders/${uploadSessionId}/rev-1/large.jpg`,
+          width: 1080,
+          height: 1920,
+          revision: 1,
+        });
         expect(res.body.data.renderTransform).toEqual({
           version: 1,
           zoom: 1,
@@ -884,9 +914,26 @@ describe('Images Upload Flow API (e2e)', () => {
       .expect((res) => {
         expect(res.body.success).toBe(true);
         expect(res.body.data.imageId).toBe(uploadSessionId);
+        expect(res.body.data.frameId).toBe(alternateFrameId);
         expect(res.body.data.pendingFrameId).toBeNull();
-        expect(res.body.data.frameRenderStatus).toBe(FrameRenderStatus.READY);
+        expect(res.body.data.frameRenderStatus).toBe(
+          FrameRenderStatus.PROCESSING,
+        );
+        expect(res.body.data.activeRenderRevision).toBe(2);
+        expect(res.body.data.queued).toBe(true);
       });
+
+    if (state.image) {
+      state.image.frameRenderStatus = FrameRenderStatus.READY;
+      state.image.processingStatus = ProcessingStatus.COMPLETED;
+      state.image.thumbnailUrl = `https://signed.example.com/image-renders/${uploadSessionId}/rev-2/thumbnail.jpg`;
+      state.image.finalRender = {
+        cdnUrl: `https://signed.example.com/image-renders/${uploadSessionId}/rev-2/large.jpg`,
+        width: 1080,
+        height: 1920,
+        revision: 2,
+      };
+    }
 
     await request(app.getHttpServer())
       .get(`/api/v1/images/${uploadSessionId}`)
@@ -898,6 +945,12 @@ describe('Images Upload Flow API (e2e)', () => {
         expect(res.body.data.pendingFrameId).toBeNull();
         expect(res.body.data.frameRenderStatus).toBe(FrameRenderStatus.READY);
         expect(res.body.data.thumbnailUrl).toContain('rev-2');
+        expect(res.body.data.finalRender).toEqual({
+          cdnUrl: `https://signed.example.com/image-renders/${uploadSessionId}/rev-2/large.jpg`,
+          width: 1080,
+          height: 1920,
+          revision: 2,
+        });
       });
 
     await request(app.getHttpServer())
@@ -907,8 +960,17 @@ describe('Images Upload Flow API (e2e)', () => {
       .expect((res) => {
         expect(res.body.success).toBe(true);
         expect(res.body.data.imageId).toBe(uploadSessionId);
-        expect(res.body.data.processingStatus).toBe(ProcessingStatus.UPLOADED);
+        expect(res.body.data.processingStatus).toBe(ProcessingStatus.COMPLETED);
         expect(res.body.data.variants).toEqual([]);
+      });
+
+    await request(app.getHttpServer())
+      .delete(`/api/v1/images/${uploadSessionId}`)
+      .set('Authorization', 'Bearer premium-user-token')
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data).toBeNull();
       });
 
     expect(framesServiceMock.getFrameById).toHaveBeenCalledWith(

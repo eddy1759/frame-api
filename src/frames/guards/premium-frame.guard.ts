@@ -43,6 +43,27 @@ export class PremiumFrameGuard implements CanActivate {
       return true;
     }
 
+    const currentUser = (
+      request as Request & {
+        user?: { role?: UserRole; subscriptionActive?: boolean };
+      }
+    ).user;
+
+    if (currentUser?.role === UserRole.ADMIN) {
+      return true;
+    }
+
+    if (currentUser) {
+      if (!currentUser.subscriptionActive) {
+        throw new ForbiddenException({
+          code: 'PREMIUM_REQUIRED',
+          message: 'This frame requires an active premium subscription.',
+        });
+      }
+
+      return true;
+    }
+
     const header = request.headers.authorization;
     if (!header || !header.startsWith('Bearer ')) {
       throw new UnauthorizedException({

@@ -22,6 +22,7 @@ export enum VariantType {
 
 export enum FrameRenderStatus {
   NONE = 'none',
+  PROCESSING = 'processing',
   READY = 'ready',
   PENDING_REPROCESS = 'pending_reprocess',
 }

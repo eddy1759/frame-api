@@ -223,6 +223,61 @@ describe('AuthController (integration)', () => {
     });
   });
 
+  it('runs admin password sign-in with separate email and ip brute-force keys', async () => {
+    const adminAuthResponse = {
+      accessToken: 'admin-access-token',
+      refreshToken: 'admin-refresh-token',
+      expiresIn: 3600,
+      isNewUser: false,
+      user: {
+        id: 'admin-uuid-1',
+        email: 'admin@example.com',
+        displayName: 'Admin',
+        avatarUrl: null,
+        status: UserStatus.ACTIVE,
+        role: UserRole.ADMIN,
+        subscriptionActive: false,
+        storageUsed: 0,
+        storageLimit: 5368709120,
+        createdAt: mockUser.createdAt,
+        lastLoginAt: null,
+        linkedAccounts: [],
+      },
+    };
+    const signInSpy = jest
+      .spyOn(authService, 'adminPasswordSignIn')
+      .mockResolvedValue(adminAuthResponse);
+
+    const result = await controller.adminSignIn(
+      {
+        email: 'Admin@Example.com',
+        password: 'CorrectHorseBatteryStaple!',
+        deviceInfo: { platform: 'web' },
+      },
+      makeRequest('10.1.1.1'),
+    );
+
+    expect(throttleGuard.checkRateLimit).toHaveBeenCalledWith(
+      expect.objectContaining({ ip: '10.1.1.1' }),
+      { limit: 5, ttlSeconds: 300 },
+    );
+    expect(bruteForceGuard.checkBruteForce).toHaveBeenCalledWith('10.1.1.1');
+    expect(bruteForceGuard.checkBruteForce).toHaveBeenCalledWith(
+      'admin-email:admin@example.com',
+    );
+    expect(signInSpy).toHaveBeenCalledWith(
+      'Admin@Example.com',
+      'CorrectHorseBatteryStaple!',
+      { platform: 'web' },
+      '10.1.1.1',
+    );
+    expect(bruteForceGuard.resetAttempts).toHaveBeenCalledWith('10.1.1.1');
+    expect(bruteForceGuard.resetAttempts).toHaveBeenCalledWith(
+      'admin-email:admin@example.com',
+    );
+    expect(result.accessToken).toBe('admin-access-token');
+  });
+
   it('records failed brute-force attempt when google login is unauthorized', async () => {
     jest.spyOn(authService, 'oauthLogin').mockRejectedValue(
       new UnauthorizedException({
@@ -240,6 +295,32 @@ describe('AuthController (integration)', () => {
 
     expect(bruteForceGuard.recordFailedAttempt).toHaveBeenCalledWith('8.8.8.8');
     expect(bruteForceGuard.resetAttempts).not.toHaveBeenCalled();
+  });
+
+  it('records both brute-force counters when admin password sign-in is unauthorized', async () => {
+    jest.spyOn(authService, 'adminPasswordSignIn').mockRejectedValue(
+      new UnauthorizedException({
+        code: 'AUTH_INVALID_ADMIN_CREDENTIALS',
+        message: 'Invalid email or password.',
+      }),
+    );
+
+    await expect(
+      controller.adminSignIn(
+        {
+          email: 'admin@example.com',
+          password: 'wrong-password',
+        },
+        makeRequest('198.51.100.12'),
+      ),
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(bruteForceGuard.recordFailedAttempt).toHaveBeenCalledWith(
+      '198.51.100.12',
+    );
+    expect(bruteForceGuard.recordFailedAttempt).toHaveBeenCalledWith(
+      'admin-email:admin@example.com',
+    );
   });
 
   it('passes Apple fullName payload through to auth service', async () => {

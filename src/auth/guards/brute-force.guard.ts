@@ -9,14 +9,14 @@ export class BruteForceGuard {
   constructor(private readonly redisService: RedisService) {}
 
   /**
-   * Check if an IP is blocked due to too many failed attempts.
+   * Check if a subject key is blocked due to too many failed attempts.
    */
-  async checkBruteForce(ip: string): Promise<void> {
-    const blockKey = `${AUTH.BRUTE_FORCE_PREFIX}block:${ip}`;
+  async checkBruteForce(subject: string): Promise<void> {
+    const blockKey = `${AUTH.BRUTE_FORCE_PREFIX}block:${subject}`;
     const isBlocked = await this.redisService.exists(blockKey);
 
     if (isBlocked) {
-      this.logger.warn(`Blocked IP attempted login: ip=${ip}`);
+      this.logger.warn(`Blocked subject attempted login: subject=${subject}`);
 
       throw new HttpException(
         {
@@ -31,8 +31,8 @@ export class BruteForceGuard {
   /**
    * Record a failed authentication attempt.
    */
-  async recordFailedAttempt(ip: string): Promise<void> {
-    const attemptsKey = `${AUTH.BRUTE_FORCE_PREFIX}attempts:${ip}`;
+  async recordFailedAttempt(subject: string): Promise<void> {
+    const attemptsKey = `${AUTH.BRUTE_FORCE_PREFIX}attempts:${subject}`;
     const current = await this.redisService.get(attemptsKey);
     const attempts = current ? parseInt(current, 10) + 1 : 1;
 
@@ -41,7 +41,7 @@ export class BruteForceGuard {
 
     if (attempts >= AUTH.BRUTE_FORCE_MAX_ATTEMPTS) {
       // Block the IP
-      const blockKey = `${AUTH.BRUTE_FORCE_PREFIX}block:${ip}`;
+      const blockKey = `${AUTH.BRUTE_FORCE_PREFIX}block:${subject}`;
       await this.redisService.set(
         blockKey,
         '1',
@@ -49,7 +49,7 @@ export class BruteForceGuard {
       );
 
       this.logger.warn(
-        `IP blocked due to brute force: ip=${ip}, attempts=${attempts}`,
+        `Subject blocked due to brute force: subject=${subject}, attempts=${attempts}`,
       );
     }
   }
@@ -57,8 +57,8 @@ export class BruteForceGuard {
   /**
    * Reset failed attempts on successful login.
    */
-  async resetAttempts(ip: string): Promise<void> {
-    const attemptsKey = `${AUTH.BRUTE_FORCE_PREFIX}attempts:${ip}`;
+  async resetAttempts(subject: string): Promise<void> {
+    const attemptsKey = `${AUTH.BRUTE_FORCE_PREFIX}attempts:${subject}`;
     await this.redisService.del(attemptsKey);
   }
 }

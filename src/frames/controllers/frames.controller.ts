@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -21,6 +22,7 @@ import { CurrentUser } from '../../auth/decorators/current-user.decorator';
 import { Public } from '../../auth/decorators/public.decorator';
 import { User } from '../../auth/entities/user.entity';
 import { AuthThrottleGuard } from '../../auth/guards/custom-throttle.guard';
+import { CustomizeFrameDto } from '../dto/customize-frame.dto';
 import {
   QueryFramesDto,
   QueryPopularFramesDto,
@@ -84,7 +86,7 @@ export class FramesController {
     @Param('slug') slug: string,
     @CurrentUser() user: User | null,
   ): Promise<unknown> {
-    return this.framesService.getFrameBySlug(slug, user?.id);
+    return this.framesService.getFrameBySlug(slug, user);
   }
 
   @Public()
@@ -106,11 +108,11 @@ export class FramesController {
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() user: User | null,
   ): Promise<unknown> {
-    return this.framesService.getFrameById(id, user?.id);
+    return this.framesService.getFrameById(id, user);
   }
 
   @Public()
-  @UseGuards(PremiumFrameGuard)
+  @UseGuards(OptionalJwtGuard, PremiumFrameGuard)
   @Get(':id([0-9a-fA-F-]{36})/svg')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get frame SVG CDN URL' })
@@ -121,12 +123,15 @@ export class FramesController {
     description: 'Unauthorized for premium frame access',
   })
   @ApiResponse({ status: 403, description: 'Premium subscription required' })
-  async svg(@Param('id', ParseUUIDPipe) id: string): Promise<unknown> {
-    return this.framesService.getFrameSvgUrl(id);
+  async svg(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User | null,
+  ): Promise<unknown> {
+    return this.framesService.getFrameSvgUrl(id, user);
   }
 
   @Public()
-  @UseGuards(PremiumFrameGuard)
+  @UseGuards(OptionalJwtGuard, PremiumFrameGuard)
   @Get(':id([0-9a-fA-F-]{36})/editor-preview')
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({ summary: 'Get frame editor preview PNG URL' })
@@ -139,8 +144,25 @@ export class FramesController {
   @ApiResponse({ status: 403, description: 'Premium subscription required' })
   async editorPreview(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User | null,
   ): Promise<unknown> {
-    return this.framesService.getFrameEditorPreviewUrl(id);
+    return this.framesService.getFrameEditorPreviewUrl(id, user);
+  }
+
+  @Post(':id([0-9a-fA-F-]{36})/customize')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Create a personalized private copy of a frame' })
+  @ApiParam({ name: 'id', description: 'Source frame ID' })
+  @ApiResponse({
+    status: 201,
+    description: 'Personalized private frame created successfully',
+  })
+  async customize(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: User,
+    @Body() dto: CustomizeFrameDto,
+  ): Promise<unknown> {
+    return this.framesService.customizeFrame(id, user, dto);
   }
 
   @Post(':id([0-9a-fA-F-]{36})/apply')

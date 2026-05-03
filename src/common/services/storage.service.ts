@@ -19,6 +19,7 @@ import {
   ListObjectsV2Command,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { Readable } from 'stream';
 import { StorageConfig } from '../config/storage.config';
 import { StoragePort, StorageUploadResult } from './storage/storage.port';
@@ -49,6 +50,10 @@ export class StorageService implements StoragePort, OnModuleInit {
       region: storage.region,
       endpoint: storage.endpoint,
       forcePathStyle: storage.forcePathStyle,
+      requestHandler: new NodeHttpHandler({
+        connectionTimeout: storage.connectionTimeoutMs,
+        socketTimeout: storage.socketTimeoutMs,
+      }),
       credentials: {
         accessKeyId: storage.accessKeyId,
         secretAccessKey: storage.secretAccessKey,
@@ -83,29 +88,49 @@ export class StorageService implements StoragePort, OnModuleInit {
   ): Promise<StorageUploadResult> {
     const normalizedKey = this.normalizeKey(key);
 
-    try {
-      await this.client.send(
-        new PutObjectCommand({
-          Bucket: this.bucket,
-          Key: normalizedKey,
-          Body: body,
-          ContentType: contentType,
-        }),
-      );
+    for (let attempt = 1; attempt <= this.config.uploadMaxAttempts; attempt++) {
+      try {
+        await this.client.send(
+          new PutObjectCommand({
+            Bucket: this.bucket,
+            Key: normalizedKey,
+            Body: body,
+            ContentType: contentType,
+          }),
+        );
 
-      return {
-        key: normalizedKey,
-        url: this.buildUrl(normalizedKey),
-        size: body.byteLength,
-      };
-    } catch (error) {
-      this.logger.error(`Upload failed for ${normalizedKey}`, error as Error);
+        return {
+          key: normalizedKey,
+          url: this.buildUrl(normalizedKey),
+          size: body.byteLength,
+        };
+      } catch (error) {
+        if (
+          attempt < this.config.uploadMaxAttempts &&
+          this.isRetryableUploadError(error)
+        ) {
+          const delayMs = this.config.uploadBaseDelayMs * 2 ** (attempt - 1);
+          this.logger.warn(
+            `Transient upload failure for ${normalizedKey}; retrying attempt ${attempt + 1}/${this.config.uploadMaxAttempts} in ${delayMs}ms`,
+            error as Error,
+          );
+          await this.sleep(delayMs);
+          continue;
+        }
 
-      throw new InternalServerErrorException({
-        code: 'STORAGE_UPLOAD_FAILED',
-        message: 'Failed to upload asset to storage',
-      });
+        this.logger.error(`Upload failed for ${normalizedKey}`, error as Error);
+
+        throw new InternalServerErrorException({
+          code: 'STORAGE_UPLOAD_FAILED',
+          message: 'Failed to upload asset to storage',
+        });
+      }
     }
+
+    throw new InternalServerErrorException({
+      code: 'STORAGE_UPLOAD_FAILED',
+      message: 'Failed to upload asset to storage',
+    });
   }
 
   async putObject(
@@ -335,5 +360,66 @@ export class StorageService implements StoragePort, OnModuleInit {
   getPublicUrl(key: string): string {
     const normalizedKey = this.normalizeKey(key);
     return this.buildUrl(normalizedKey);
+  }
+
+  private isRetryableUploadError(error: unknown): boolean {
+    if (!error || typeof error !== 'object') {
+      return false;
+    }
+
+    const candidate = error as {
+      name?: string;
+      code?: string;
+      message?: string;
+      $metadata?: { httpStatusCode?: number };
+      cause?: { code?: string; message?: string; name?: string };
+    };
+
+    const httpStatusCode = candidate.$metadata?.httpStatusCode;
+    if (
+      httpStatusCode !== undefined &&
+      [408, 429, 500, 502, 503, 504].includes(httpStatusCode)
+    ) {
+      return true;
+    }
+
+    const codes = [
+      candidate.code,
+      candidate.cause?.code,
+      candidate.name,
+      candidate.cause?.name,
+    ]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => value.toUpperCase());
+
+    if (
+      codes.some((value) =>
+        [
+          'ECONNRESET',
+          'ETIMEDOUT',
+          'ECONNREFUSED',
+          'EPIPE',
+          'TIMEOUTERROR',
+        ].includes(value),
+      )
+    ) {
+      return true;
+    }
+
+    const message = [candidate.message, candidate.cause?.message]
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
+      .toLowerCase();
+
+    return (
+      message.includes('econnreset') ||
+      message.includes('socket hang up') ||
+      message.includes('timed out') ||
+      message.includes('timeout')
+    );
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 }

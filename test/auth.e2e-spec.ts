@@ -45,6 +45,7 @@ const mockCurrentUser: User = {
 };
 
 const authServiceMock = {
+  adminPasswordSignIn: jest.fn(),
   oauthLogin: jest.fn(),
   refreshTokens: jest.fn(),
   getProfile: jest.fn(),
@@ -177,6 +178,27 @@ describe('Auth API (e2e)', () => {
       },
     });
 
+    authServiceMock.adminPasswordSignIn.mockResolvedValue({
+      accessToken: 'admin-access-token',
+      refreshToken: 'admin-refresh-token',
+      expiresIn: 3600,
+      isNewUser: false,
+      user: {
+        id: 'admin-1',
+        email: 'admin@example.com',
+        displayName: 'Admin User',
+        avatarUrl: null,
+        status: UserStatus.ACTIVE,
+        role: UserRole.ADMIN,
+        subscriptionActive: false,
+        storageUsed: 0,
+        storageLimit: 5368709120,
+        createdAt: mockCurrentUser.createdAt,
+        lastLoginAt: null,
+        linkedAccounts: [],
+      },
+    });
+
     authServiceMock.refreshTokens.mockResolvedValue({
       accessToken: 'new-access-token',
       refreshToken: 'new-refresh-token',
@@ -236,6 +258,40 @@ describe('Auth API (e2e)', () => {
   });
 
   describe('public auth routes', () => {
+    it('accepts valid admin sign-in payload and returns envelope', () => {
+      return request(app.getHttpServer())
+        .post('/api/v1/auth/admin/signin')
+        .send({
+          email: 'ADMIN@example.com',
+          password: 'CorrectHorseBatteryStaple!',
+        })
+        .expect(200)
+        .expect((res) => {
+          expect(res.body.success).toBe(true);
+          expect(res.body.data.accessToken).toBe('admin-access-token');
+          expect(res.body.meta.requestId).toBeDefined();
+        })
+        .then(() => {
+          expect(authServiceMock.adminPasswordSignIn).toHaveBeenCalledWith(
+            'admin@example.com',
+            'CorrectHorseBatteryStaple!',
+            undefined,
+            expect.any(String),
+          );
+        });
+    });
+
+    it('returns 400 when admin sign-in payload is invalid', () => {
+      return request(app.getHttpServer())
+        .post('/api/v1/auth/admin/signin')
+        .send({ email: 'not-an-email', password: '' })
+        .expect(400)
+        .expect((res) => {
+          expect(res.body.success).toBe(false);
+          expect(res.body.error.code).toBe('BAD_REQUEST');
+        });
+    });
+
     it('accepts valid Google login payload and returns envelope', () => {
       return request(app.getHttpServer())
         .post('/api/v1/auth/google')
@@ -289,6 +345,27 @@ describe('Auth API (e2e)', () => {
           expect(bruteForceGuardMock.recordFailedAttempt).toHaveBeenCalledWith(
             expect.any(String),
           );
+        });
+    });
+
+    it('returns standardized invalid admin credential errors', () => {
+      authServiceMock.adminPasswordSignIn.mockRejectedValue(
+        new UnauthorizedException({
+          code: 'AUTH_INVALID_ADMIN_CREDENTIALS',
+          message: 'Invalid email or password.',
+        }),
+      );
+
+      return request(app.getHttpServer())
+        .post('/api/v1/auth/admin/signin')
+        .send({
+          email: 'admin@example.com',
+          password: 'wrong-password',
+        })
+        .expect(401)
+        .expect((res) => {
+          expect(res.body.success).toBe(false);
+          expect(res.body.error.code).toBe('AUTH_INVALID_ADMIN_CREDENTIALS');
         });
     });
 

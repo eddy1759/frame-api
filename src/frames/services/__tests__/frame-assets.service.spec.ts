@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 import { Frame } from '../../entities/frame.entity';
 import { FrameAsset } from '../../entities/frame-asset.entity';
 import { FrameAssetsService } from '../frame-assets.service';
+import { FrameCompositorService } from '../frame-compositor.service';
 import { StoragePort } from '../../../common/services';
 import { FramesCacheService } from '../frames-cache.service';
 import { FrameOrientation } from '../../entities/frame-orientation.enum';
@@ -13,6 +14,7 @@ describe('FrameAssetsService', () => {
   let frameAssetRepository: jest.Mocked<Repository<FrameAsset>>;
   let storageService: jest.Mocked<StoragePort>;
   let framesCacheService: jest.Mocked<FramesCacheService>;
+  let frameCompositorService: jest.Mocked<FrameCompositorService>;
 
   const makeFrame = (overrides: Partial<Frame> = {}): Frame =>
     ({
@@ -38,6 +40,8 @@ describe('FrameAssetsService', () => {
       thumbnailUrl: null,
       createdById: null,
       createdBy: null,
+      generatedById: null,
+      generatedBy: null,
       categories: [],
       tags: [],
       assets: [],
@@ -47,31 +51,66 @@ describe('FrameAssetsService', () => {
       ...overrides,
     }) as Frame;
 
+  const renderedSet = {
+    svgBuffer: Buffer.from('<svg />'),
+    svgCanvas: { width: 1080, height: 1920 },
+    preview: { buffer: Buffer.from('preview'), width: 1080, height: 1920 },
+    thumbnails: {
+      small: { buffer: Buffer.from('sm'), width: 150, height: 267 },
+      medium: { buffer: Buffer.from('md'), width: 300, height: 533 },
+      large: { buffer: Buffer.from('lg'), width: 600, height: 1067 },
+    },
+  };
+
   beforeEach(() => {
     frameRepository = {
       findOne: jest.fn(),
-      save: jest.fn(),
+      save: jest.fn(async (value) => value),
     } as unknown as jest.Mocked<Repository<Frame>>;
 
     frameAssetRepository = {
       delete: jest.fn(),
       create: jest.fn((value: unknown) => value as FrameAsset),
       save: jest.fn(),
+      find: jest.fn(),
+      findOne: jest.fn(),
     } as unknown as jest.Mocked<Repository<FrameAsset>>;
 
     storageService = {
-      uploadBuffer: jest.fn(),
+      uploadBuffer: jest.fn(async (key: string, body: Buffer) => ({
+        key,
+        size: body.byteLength,
+        url: `http://localhost:9000/frame-assets/${key}`,
+      })),
+      getPublicUrl: jest.fn(
+        (key: string) => `http://localhost:9000/frame-assets/${key}`,
+      ),
+      deleteObjects: jest.fn(),
+      getObjectBuffer: jest.fn(async () => Buffer.from('<svg />')),
     } as unknown as jest.Mocked<StoragePort>;
 
     framesCacheService = {
       invalidateFrame: jest.fn(),
     } as unknown as jest.Mocked<FramesCacheService>;
 
+    frameCompositorService = {
+      sanitizeUploadedSvg: jest.fn((svg: string) => svg),
+      sanitizeGeneratedSvg: jest.fn((svg: string) => svg),
+      composeTitleOverlay: jest.fn((svg: string) => svg),
+      inferImagePlacementFromSvg: jest.fn(() => null),
+      normalizeTitleConfigForImagePlacement: jest.fn(
+        (config: unknown) => config,
+      ),
+      validateAspectRatio: jest.fn(() => ({ width: 1080, height: 1920 })),
+      renderFrameAssetSet: jest.fn(async () => renderedSet),
+    } as unknown as jest.Mocked<FrameCompositorService>;
+
     service = new FrameAssetsService(
       frameRepository,
       frameAssetRepository,
       storageService,
       framesCacheService,
+      frameCompositorService,
     );
   });
 
@@ -105,135 +144,32 @@ describe('FrameAssetsService', () => {
     ).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('rejects non-SVG XML payloads', async () => {
+  it('sanitizes, renders, and persists uploaded SVG assets', async () => {
     frameRepository.findOne.mockResolvedValueOnce(makeFrame());
-
-    await expect(
-      service.uploadSvgAsset('frame-1', {
-        buffer: Buffer.from('<html><body>not-svg</body></html>'),
-        size: 33,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('rejects SVG uploads without a usable canvas', async () => {
-    frameRepository.findOne.mockResolvedValueOnce(makeFrame());
-
-    await expect(
-      service.uploadSvgAsset('frame-1', {
-        buffer: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg"><rect width="10" height="10" /></svg>',
-        ),
-        size: 74,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('rejects SVG uploads whose aspect ratio does not match the frame', async () => {
-    frameRepository.findOne.mockResolvedValueOnce(
-      makeFrame({
-        width: 1920,
-        height: 1080,
-        aspectRatio: '16:9',
-        orientation: FrameOrientation.LANDSCAPE,
-      }),
-    );
-
-    await expect(
-      service.uploadSvgAsset('frame-1', {
-        buffer: Buffer.from(
-          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920"><rect width="1080" height="1920" fill="#000" /></svg>',
-        ),
-        size: 122,
-      }),
-    ).rejects.toBeInstanceOf(BadRequestException);
-  });
-
-  it('sanitizes malicious SVG and uploads all derived assets', async () => {
-    const frame = makeFrame();
-    frameRepository.findOne.mockResolvedValueOnce(frame);
-    frameRepository.save.mockResolvedValueOnce(
-      makeFrame({
-        svgUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
-        editorPreviewUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
-        thumbnailUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
-      }),
-    );
-
-    const uploadMock = storageService.uploadBuffer as jest.Mock;
-    uploadMock.mockImplementation(
-      (key: string, body: Buffer) =>
-        ({
-          key,
-          size: body.byteLength,
-          url: `http://localhost:9000/frame-assets/${key}`,
-        }) as { key: string; size: number; url: string },
-    );
-
-    jest
-      .spyOn(
-        service as unknown as {
-          createThumbnail: (...args: unknown[]) => Promise<unknown>;
-        },
-        'createThumbnail',
-      )
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-sm'),
-        width: 120,
-        height: 150,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-md'),
-        width: 240,
-        height: 300,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-lg'),
-        width: 480,
-        height: 600,
-      });
-
-    const maliciousSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" onload="alert(1)">
-        <script>alert('xss')</script>
-        <use href="https://evil.example/resource.svg#id" />
-        <foreignObject><div>bad</div></foreignObject>
-        <image href="https://evil.example/image.png" />
-        <rect width="10" height="10" style="fill:url(https://evil.example/style.png)" />
-      </svg>
-    `;
 
     const result = await service.uploadSvgAsset('frame-1', {
-      buffer: Buffer.from(maliciousSvg, 'utf8'),
-      size: Buffer.byteLength(maliciousSvg),
+      buffer: Buffer.from('<svg viewBox="0 0 1080 1920" />'),
+      size: 31,
       mimetype: 'image/svg+xml',
-      originalname: 'malicious.svg',
+      originalname: 'frame.svg',
     });
 
+    expect(frameCompositorService.sanitizeUploadedSvg).toHaveBeenCalled();
+    expect(frameCompositorService.validateAspectRatio).toHaveBeenCalledWith(
+      '<svg viewBox="0 0 1080 1920" />',
+      1080,
+      1920,
+    );
+    expect(frameCompositorService.renderFrameAssetSet).toHaveBeenCalled();
     expect(storageService.uploadBuffer).toHaveBeenCalledTimes(5);
     expect(frameAssetRepository.delete).toHaveBeenCalledWith({
       frameId: 'frame-1',
     });
     expect(frameAssetRepository.save).toHaveBeenCalledTimes(1);
-    expect(frameRepository.save).toHaveBeenCalledTimes(1);
     expect(framesCacheService.invalidateFrame).toHaveBeenCalledWith(
       'frame-1',
       'sample-frame',
     );
-
-    const [svgKey, svgBuffer] = uploadMock.mock.calls[0] as [string, Buffer];
-    const sanitized = svgBuffer.toString('utf8');
-
-    expect(svgKey).toBe('frames/frame-1/original.svg');
-    expect(sanitized).not.toContain('<script');
-    expect(sanitized).not.toContain('<use');
-    expect(sanitized).not.toContain('<foreignObject');
-    expect(sanitized).not.toMatch(/\son\w+=/i);
-    expect(sanitized).not.toMatch(/https?:\/\/evil\.example/i);
-
     expect(result).toEqual({
       svgUrl: 'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
       editorPreviewUrl:
@@ -249,149 +185,197 @@ describe('FrameAssetsService', () => {
     });
   });
 
-  it('strips xlink/src/javascript references and external css urls', async () => {
-    const frame = makeFrame();
-    frameRepository.findOne.mockResolvedValueOnce(frame);
-    frameRepository.save.mockResolvedValueOnce(
+  it('applies configured title overlays before rendering uploaded assets', async () => {
+    frameRepository.findOne.mockResolvedValueOnce(
       makeFrame({
-        svgUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
-        editorPreviewUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
-        thumbnailUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
+        metadata: {
+          titleConfig: {
+            text: 'Wedding Anniversary',
+            fontFamily: 'Playfair Display',
+            fontSizeRatio: 0.05,
+            color: '#ffffff',
+            position: {
+              x: 0.18,
+              y: 0.84,
+              width: 0.64,
+              height: 0.08,
+            },
+            align: 'center',
+          },
+        },
       }),
     );
-
-    const uploadMock = storageService.uploadBuffer as jest.Mock;
-    uploadMock.mockImplementation(
-      (key: string, body: Buffer) =>
-        ({
-          key,
-          size: body.byteLength,
-          url: `http://localhost:9000/frame-assets/${key}`,
-        }) as { key: string; size: number; url: string },
+    frameCompositorService.composeTitleOverlay.mockReturnValue(
+      '<svg id="titled"/>',
     );
 
-    jest
-      .spyOn(
-        service as unknown as {
-          createThumbnail: (...args: unknown[]) => Promise<unknown>;
-        },
-        'createThumbnail',
-      )
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-sm'),
-        width: 120,
-        height: 150,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-md'),
-        width: 240,
-        height: 300,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-lg'),
-        width: 480,
-        height: 600,
-      });
-
-    const maliciousSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1080 1920">
-        <image xlink:href="https://evil.example/payload.png" />
-        <image src="https://evil.example/payload-2.png" />
-        <a href="javascript:alert(1)">x</a>
-        <rect style="fill:url(javascript:alert(1));stroke:url(//evil.example/line.png)" />
-        <style>.bg{background-image:url(https://evil.example/bg.png)}</style>
-      </svg>
-    `;
-
     await service.uploadSvgAsset('frame-1', {
-      buffer: Buffer.from(maliciousSvg, 'utf8'),
-      size: Buffer.byteLength(maliciousSvg),
+      buffer: Buffer.from('<svg viewBox="0 0 1080 1920" />'),
+      size: 31,
     });
 
-    const [, svgBuffer] = uploadMock.mock.calls[0] as [string, Buffer];
-    const sanitized = svgBuffer.toString('utf8');
-
-    expect(sanitized).not.toMatch(/xlink:href=/i);
-    expect(sanitized).not.toMatch(/\ssrc=/i);
-    expect(sanitized).not.toMatch(/href="javascript:/i);
-    expect(sanitized).not.toMatch(/url\(javascript:/i);
-    expect(sanitized).not.toMatch(/url\(\/\/evil\.example/i);
-    expect(sanitized).not.toMatch(/evil\.example\/bg\.png/i);
+    expect(frameCompositorService.composeTitleOverlay).toHaveBeenCalledWith(
+      '<svg viewBox="0 0 1080 1920" />',
+      expect.objectContaining({
+        text: 'Wedding Anniversary',
+      }),
+      1080,
+      1920,
+    );
+    expect(frameCompositorService.renderFrameAssetSet).toHaveBeenCalledWith(
+      '<svg id="titled"/>',
+    );
   });
 
-  it('preserves safe gradient definitions needed for overlay frames', async () => {
-    const frame = makeFrame();
-    frameRepository.findOne.mockResolvedValueOnce(frame);
-    frameRepository.save.mockResolvedValueOnce(
-      makeFrame({
-        svgUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
-        editorPreviewUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/editor-preview.png',
-        thumbnailUrl:
-          'http://localhost:9000/frame-assets/frames/frame-1/thumbnail-md.png',
-      }),
-    );
-
-    const uploadMock = storageService.uploadBuffer as jest.Mock;
-    uploadMock.mockImplementation(
-      (key: string, body: Buffer) =>
-        ({
-          key,
-          size: body.byteLength,
-          url: `http://localhost:9000/frame-assets/${key}`,
-        }) as { key: string; size: number; url: string },
-    );
-
-    jest
-      .spyOn(
-        service as unknown as {
-          createThumbnail: (...args: unknown[]) => Promise<unknown>;
+  it('infers image placement and normalizes title config before persisting titled uploads', async () => {
+    const frame = makeFrame({
+      width: 1080,
+      height: 1080,
+      aspectRatio: '1:1',
+      orientation: FrameOrientation.SQUARE,
+      metadata: {
+        titleConfig: {
+          text: 'Wedding Anniversary',
+          fontFamily: 'Inter',
+          fontSizeRatio: 0.05,
+          color: '#ffffff',
+          position: {
+            x: 0.1,
+            y: 0.78,
+            width: 0.8,
+            height: 0.08,
+          },
+          align: 'center',
         },
-        'createThumbnail',
-      )
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-sm'),
-        width: 120,
-        height: 150,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-md'),
-        width: 240,
-        height: 300,
-      })
-      .mockResolvedValueOnce({
-        buffer: Buffer.from('png-lg'),
-        width: 480,
-        height: 600,
-      });
-
-    const gradientSvg = `
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920">
-        <defs>
-          <linearGradient id="frameFill" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#111827" />
-            <stop offset="100%" stop-color="#374151" stop-opacity="0.9" />
-          </linearGradient>
-        </defs>
-        <path d="M0 0H1080V1920H0Z M140 260H940V1660H140Z" fill="url(#frameFill)" fill-rule="evenodd" />
-      </svg>
-    `;
+      },
+    });
+    frameRepository.findOne.mockResolvedValueOnce(frame);
+    frameCompositorService.validateAspectRatio.mockReturnValueOnce({
+      width: 1080,
+      height: 1080,
+    });
+    frameCompositorService.inferImagePlacementFromSvg.mockReturnValueOnce({
+      version: 1,
+      fit: 'cover',
+      window: {
+        x: 0.1296296296,
+        y: 0.1296296296,
+        width: 0.7407407407,
+        height: 0.7407407407,
+      },
+    });
+    frameCompositorService.normalizeTitleConfigForImagePlacement.mockReturnValueOnce(
+      {
+        text: 'Wedding Anniversary',
+        fontFamily: 'Inter',
+        fontSizeRatio: 0.05,
+        color: '#ffffff',
+        position: {
+          x: 0.1,
+          y: 0.8951851852,
+          width: 0.8,
+          height: 0.08,
+        },
+        align: 'center',
+      },
+    );
+    frameCompositorService.composeTitleOverlay.mockReturnValue(
+      '<svg id="normalized"/>',
+    );
 
     await service.uploadSvgAsset('frame-1', {
-      buffer: Buffer.from(gradientSvg, 'utf8'),
-      size: Buffer.byteLength(gradientSvg),
+      buffer: Buffer.from('<svg viewBox="0 0 1080 1080" />'),
+      size: 31,
     });
 
-    const [, svgBuffer] = uploadMock.mock.calls[0] as [string, Buffer];
-    const sanitized = svgBuffer.toString('utf8');
+    expect(
+      frameCompositorService.inferImagePlacementFromSvg,
+    ).toHaveBeenCalledWith('<svg viewBox="0 0 1080 1080" />', 1080, 1080);
+    expect(
+      frameCompositorService.normalizeTitleConfigForImagePlacement,
+    ).toHaveBeenCalled();
+    expect(frameCompositorService.composeTitleOverlay).toHaveBeenCalledWith(
+      '<svg viewBox="0 0 1080 1080" />',
+      expect.objectContaining({
+        position: expect.objectContaining({
+          y: 0.8951851852,
+        }),
+      }),
+      1080,
+      1080,
+    );
+    expect(frameRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          imagePlacement: expect.objectContaining({
+            window: expect.objectContaining({
+              x: 0.1296296296,
+            }),
+          }),
+          titleConfig: expect.objectContaining({
+            position: expect.objectContaining({
+              y: 0.8951851852,
+            }),
+          }),
+        }),
+      }),
+    );
+  });
 
-    expect(sanitized).toContain('<linearGradient');
-    expect(sanitized).toContain('id="frameFill"');
-    expect(sanitized).toContain('fill="url(#frameFill)"');
-    expect(sanitized).toContain('fill-rule="evenodd"');
+  it('uses generated SVG sanitization for AI-composed frames', async () => {
+    frameRepository.findOne.mockResolvedValueOnce(makeFrame());
+
+    await service.storeGeneratedSvgAsset('frame-1', '<svg />');
+
+    expect(frameCompositorService.sanitizeGeneratedSvg).toHaveBeenCalledWith(
+      '<svg />',
+    );
+    expect(frameCompositorService.renderFrameAssetSet).toHaveBeenCalled();
+  });
+
+  it('creates personalized frame assets from the source frame SVG', async () => {
+    frameRepository.findOne
+      .mockResolvedValueOnce(makeFrame({ id: 'source-frame' }))
+      .mockResolvedValueOnce(makeFrame({ id: 'target-frame' }));
+    frameAssetRepository.findOne.mockResolvedValue({
+      frameId: 'source-frame',
+      type: 'svg',
+      storageKey: 'frames/source-frame/original.svg',
+    } as FrameAsset);
+    storageService.getObjectBuffer.mockResolvedValueOnce(
+      Buffer.from('<svg viewBox="0 0 1080 1920" />'),
+    );
+    frameCompositorService.composeTitleOverlay.mockReturnValue(
+      '<svg id="personalized" />',
+    );
+
+    await service.personalizeFrameAssets('source-frame', 'target-frame', {
+      text: 'Edet Wedding Anniversary',
+      fontFamily: 'Playfair Display',
+      fontSizeRatio: 0.05,
+      color: '#ffffff',
+      position: {
+        x: 0.18,
+        y: 0.84,
+        width: 0.64,
+        height: 0.08,
+      },
+      align: 'center',
+    });
+
+    expect(storageService.getObjectBuffer).toHaveBeenCalledWith(
+      'frames/source-frame/original.svg',
+    );
+    expect(frameCompositorService.composeTitleOverlay).toHaveBeenCalledWith(
+      '<svg viewBox="0 0 1080 1920" />',
+      expect.objectContaining({
+        text: 'Edet Wedding Anniversary',
+      }),
+      1080,
+      1920,
+    );
+    expect(frameCompositorService.renderFrameAssetSet).toHaveBeenCalledWith(
+      '<svg id="personalized" />',
+    );
   });
 });

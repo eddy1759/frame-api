@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Image } from '../entities/image.entity';
 import {
+  FrameRenderStatus,
   ImageOrientation,
   ProcessingStatus,
   VariantType,
@@ -74,11 +75,13 @@ export class ImageProcessingWorker extends WorkerHost {
 
     try {
       await this.imageCompositingService.prewarmActiveRenderVariants(imageId);
+      await this.markFrameRenderReady(job.data);
       await this.publishAlbumImageAdded(job.data);
       this.logger.log(`Frame render prewarm completed for ${imageId}`);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown frame render error';
+      await this.markFrameRenderFailed(job.data, message);
       this.logger.error(
         `Frame render prewarm failed for ${imageId}: ${message}`,
       );
@@ -188,9 +191,25 @@ export class ImageProcessingWorker extends WorkerHost {
       const thumbnail = allVariants.find(
         (variant) => variant.variantType === VariantType.THUMBNAIL,
       );
+      const imageState = await this.imageRepository.findOne({
+        where: { id: imageId },
+        select: [
+          'id',
+          'frameId',
+          'frameSnapshotKey',
+          'activeRenderRevision',
+          'frameRenderStatus',
+        ],
+      });
+      const shouldQueueFrameRender =
+        Boolean(imageState?.frameId) &&
+        Boolean(imageState?.frameSnapshotKey) &&
+        Number(imageState?.activeRenderRevision ?? 0) > 0;
 
       const updatePayload: QueryDeepPartialEntity<Image> = {
-        processingStatus: ProcessingStatus.COMPLETED,
+        processingStatus: shouldQueueFrameRender
+          ? ProcessingStatus.PROCESSING
+          : ProcessingStatus.COMPLETED,
         processingError: null,
         width,
         height,
@@ -205,6 +224,10 @@ export class ImageProcessingWorker extends WorkerHost {
           ? this.storageService.getPublicUrl(thumbnail.storageKey)
           : null,
       };
+
+      if (shouldQueueFrameRender) {
+        updatePayload.frameRenderStatus = FrameRenderStatus.PROCESSING;
+      }
 
       await this.imageRepository
         .createQueryBuilder()
@@ -407,10 +430,21 @@ export class ImageProcessingWorker extends WorkerHost {
   ): Promise<void> {
     const image = await this.imageRepository.findOne({
       where: { id: jobData.imageId },
-      select: ['id', 'albumId', 'frameId', 'userId', 'activeRenderRevision'],
+      select: [
+        'id',
+        'albumId',
+        'frameId',
+        'userId',
+        'activeRenderRevision',
+        'frameRenderStatus',
+      ],
     });
 
-    if (!image?.albumId || !image.frameId) {
+    if (
+      !image?.albumId ||
+      !image.frameId ||
+      image.frameRenderStatus !== FrameRenderStatus.READY
+    ) {
       return;
     }
 
@@ -419,7 +453,7 @@ export class ImageProcessingWorker extends WorkerHost {
       imageId: image.id,
       frameId: image.frameId,
       userId: image.userId,
-      imageRenderRevision: jobData.renderRevision ?? image.activeRenderRevision,
+      imageRenderRevision: image.activeRenderRevision,
     };
 
     if (payload.imageRenderRevision < 1) {
@@ -430,5 +464,64 @@ export class ImageProcessingWorker extends WorkerHost {
       jobId: `album-add-${payload.albumId}-${payload.imageId}`,
       priority: 2,
     });
+  }
+
+  private async markFrameRenderReady(
+    jobData: ImageProcessingJobData,
+  ): Promise<void> {
+    if (jobData.renderRevision === undefined) {
+      return;
+    }
+
+    const image = await this.imageRepository.findOne({
+      where: { id: jobData.imageId },
+      select: ['id', 'userId', 'activeRenderRevision', 'frameRenderStatus'],
+    });
+
+    if (
+      !image ||
+      image.activeRenderRevision !== jobData.renderRevision ||
+      image.frameRenderStatus !== FrameRenderStatus.PROCESSING
+    ) {
+      return;
+    }
+
+    await this.imageRepository.update(image.id, {
+      frameRenderStatus: FrameRenderStatus.READY,
+      processingStatus: ProcessingStatus.COMPLETED,
+      processingError: null,
+    });
+    await this.imagesCacheService.invalidateImage(image.id);
+    await this.imagesCacheService.invalidateUserLists(image.userId);
+  }
+
+  private async markFrameRenderFailed(
+    jobData: ImageProcessingJobData,
+    message: string,
+  ): Promise<void> {
+    if (jobData.renderRevision === undefined) {
+      return;
+    }
+
+    const image = await this.imageRepository.findOne({
+      where: { id: jobData.imageId },
+      select: ['id', 'userId', 'activeRenderRevision', 'frameRenderStatus'],
+    });
+
+    if (
+      !image ||
+      image.activeRenderRevision !== jobData.renderRevision ||
+      image.frameRenderStatus !== FrameRenderStatus.PROCESSING
+    ) {
+      return;
+    }
+
+    await this.imageRepository.update(image.id, {
+      frameRenderStatus: FrameRenderStatus.PENDING_REPROCESS,
+      processingStatus: ProcessingStatus.FAILED,
+      processingError: message,
+    });
+    await this.imagesCacheService.invalidateImage(image.id);
+    await this.imagesCacheService.invalidateUserLists(image.userId);
   }
 }

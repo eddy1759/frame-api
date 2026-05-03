@@ -1,4 +1,4 @@
-﻿/* eslint-disable @typescript-eslint/no-unsafe-member-access */
+/* eslint-disable @typescript-eslint/no-unsafe-member-access */
 /* eslint-disable @typescript-eslint/no-unsafe-argument */
 import {
   BadRequestException,
@@ -13,21 +13,24 @@ import { FrameAsset } from '../entities/frame-asset.entity';
 import { FrameAssetType } from '../entities/frame-asset-type.enum';
 import { STORAGE_PORT, StoragePort } from '../../common/services';
 import { FramesCacheService } from './frames-cache.service';
-import { JSDOM } from 'jsdom';
 import {
   FrameImagePlacement,
+  FrameRenderPlacement,
+  FrameRenderMode,
+  FrameTitleConfig,
+  normalizeFrameMetadata,
+  resolveFrameRenderMode,
   resolveFrameImagePlacement,
+  resolveFrameScenePlacement,
+  resolveFrameTitleConfig,
   snapshotFrameImagePlacement,
+  snapshotFrameRenderPlacement,
 } from '../utils/frame-metadata.util';
 import {
-  extractSvgCanvasDimensions,
-  isAspectRatioCompatible,
-} from '../utils/svg-canvas.util';
-
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const sharp: typeof import('sharp') = require('sharp');
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const createDOMPurify = require('dompurify');
+  FrameCompositorService,
+  RenderedFrameAssetSet,
+  RenderedSceneAssetSet,
+} from './frame-compositor.service';
 
 const MAX_SVG_SIZE_BYTES = 5 * 1024 * 1024;
 
@@ -38,15 +41,26 @@ interface UploadedSvgFile {
   originalname?: string;
 }
 
-const window = new JSDOM('').window;
-const purify = createDOMPurify(window);
-
 export interface FrameSvgAssetInfo {
   frameId: string;
   storageKey: string;
   mimeType: string;
   fileSize: number;
   imagePlacement: FrameImagePlacement;
+}
+
+export interface FrameRenderSourceInfo {
+  frameId: string;
+  renderMode: FrameRenderMode;
+  assetType: FrameAssetType;
+  storageKey: string;
+  mimeType: string;
+  fileSize: number;
+  placement: FrameRenderPlacement;
+  canvas: {
+    width: number;
+    height: number;
+  };
 }
 
 @Injectable()
@@ -59,6 +73,7 @@ export class FrameAssetsService {
     @Inject(STORAGE_PORT)
     private readonly storageService: StoragePort,
     private readonly framesCacheService: FramesCacheService,
+    private readonly frameCompositorService: FrameCompositorService,
   ) {}
 
   async uploadSvgAsset(
@@ -99,146 +114,232 @@ export class FrameAssetsService {
     }
 
     const rawSvg = file.buffer.toString('utf8');
-    const sanitizedSvg = this.sanitizeSvg(rawSvg);
-    let svgCanvas: { width: number; height: number };
-    try {
-      svgCanvas = extractSvgCanvasDimensions(sanitizedSvg);
-    } catch (error) {
-      throw new BadRequestException({
-        code: 'INVALID_SVG',
-        message:
-          error instanceof Error
-            ? error.message
-            : 'SVG must define a usable canvas.',
-      });
-    }
-    const frameCanvas = {
-      width: frame.width,
-      height: frame.height,
+    const sanitizedSvg =
+      this.frameCompositorService.sanitizeUploadedSvg(rawSvg);
+    this.frameCompositorService.validateAspectRatio(
+      sanitizedSvg,
+      frame.width,
+      frame.height,
+    );
+    const composedSvg = this.applyConfiguredTitleOverlay(frame, sanitizedSvg);
+
+    const rendered =
+      await this.frameCompositorService.renderFrameAssetSet(composedSvg);
+
+    return this.persistRenderedAssets(frame, rendered);
+  }
+
+  async storeGeneratedSvgAsset(
+    frameId: string,
+    svg: string,
+  ): Promise<{
+    svgUrl: string;
+    editorPreviewUrl: string;
+    thumbnails: {
+      small: string;
+      medium: string;
+      large: string;
     };
+  }> {
+    const frame = await this.frameRepository.findOne({
+      where: { id: frameId },
+    });
 
-    if (!isAspectRatioCompatible(frameCanvas, svgCanvas)) {
-      throw new BadRequestException({
-        code: 'INVALID_SVG_ASPECT_RATIO',
-        message:
-          'SVG canvas aspect ratio does not match the target frame dimensions.',
+    if (!frame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
       });
     }
 
-    const svgBuffer = Buffer.from(sanitizedSvg, 'utf8');
+    const sanitizedSvg = this.frameCompositorService.sanitizeGeneratedSvg(svg);
+    this.frameCompositorService.validateAspectRatio(
+      sanitizedSvg,
+      frame.width,
+      frame.height,
+    );
+    const composedSvg = this.applyConfiguredTitleOverlay(frame, sanitizedSvg);
+    const rendered =
+      await this.frameCompositorService.renderFrameAssetSet(composedSvg);
 
-    const originalKey = `frames/${frameId}/original.svg`;
-    const originalUpload = await this.storageService.uploadBuffer(
-      originalKey,
-      svgBuffer,
-      'image/svg+xml',
+    return this.persistRenderedAssets(frame, rendered);
+  }
+
+  async storeGeneratedSceneAsset(
+    frameId: string,
+    sceneBuffer: Buffer,
+  ): Promise<{
+    editorPreviewUrl: string;
+    thumbnails: {
+      small: string;
+      medium: string;
+      large: string;
+    };
+  }> {
+    const frame = await this.frameRepository.findOne({
+      where: { id: frameId },
+    });
+
+    if (!frame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    const rendered = await this.frameCompositorService.renderSceneAssetSet(
+      sceneBuffer,
+      frame.width,
+      frame.height,
     );
 
-    const [thumbnailSmall, thumbnailMedium, thumbnailLarge, previewOverlay] =
-      await Promise.all([
-        this.createThumbnail(svgBuffer, 150),
-        this.createThumbnail(svgBuffer, 300),
-        this.createThumbnail(svgBuffer, 600),
-        this.createEditorPreview(svgBuffer, frame.width, frame.height),
-      ]);
+    return this.persistRenderedSceneAssets(frame, rendered);
+  }
 
-    const smallKey = `frames/${frameId}/thumbnail-sm.png`;
-    const mediumKey = `frames/${frameId}/thumbnail-md.png`;
-    const largeKey = `frames/${frameId}/thumbnail-lg.png`;
-    const previewKey = `frames/${frameId}/editor-preview.png`;
-
-    const [smallUpload, mediumUpload, largeUpload, previewUpload] =
-      await Promise.all([
-        this.storageService.uploadBuffer(
-          smallKey,
-          thumbnailSmall.buffer,
-          'image/png',
-        ),
-        this.storageService.uploadBuffer(
-          mediumKey,
-          thumbnailMedium.buffer,
-          'image/png',
-        ),
-        this.storageService.uploadBuffer(
-          largeKey,
-          thumbnailLarge.buffer,
-          'image/png',
-        ),
-        this.storageService.uploadBuffer(
-          previewKey,
-          previewOverlay.buffer,
-          'image/png',
-        ),
-      ]);
-
-    await this.frameAssetRepository.delete({ frameId });
-
-    const assets = this.frameAssetRepository.create([
-      {
-        frameId,
-        type: FrameAssetType.SVG,
-        storageKey: originalUpload.key,
-        mimeType: 'image/svg+xml',
-        fileSize: originalUpload.size,
-        width: Math.round(svgCanvas.width),
-        height: Math.round(svgCanvas.height),
-      },
-      {
-        frameId,
-        type: FrameAssetType.PREVIEW_PNG,
-        storageKey: previewUpload.key,
-        mimeType: 'image/png',
-        fileSize: previewUpload.size,
-        width: previewOverlay.width,
-        height: previewOverlay.height,
-      },
-      {
-        frameId,
-        type: FrameAssetType.THUMBNAIL_SM,
-        storageKey: smallUpload.key,
-        mimeType: 'image/png',
-        fileSize: smallUpload.size,
-        width: thumbnailSmall.width,
-        height: thumbnailSmall.height,
-      },
-      {
-        frameId,
-        type: FrameAssetType.THUMBNAIL_MD,
-        storageKey: mediumUpload.key,
-        mimeType: 'image/png',
-        fileSize: mediumUpload.size,
-        width: thumbnailMedium.width,
-        height: thumbnailMedium.height,
-      },
-      {
-        frameId,
-        type: FrameAssetType.THUMBNAIL_LG,
-        storageKey: largeUpload.key,
-        mimeType: 'image/png',
-        fileSize: largeUpload.size,
-        width: thumbnailLarge.width,
-        height: thumbnailLarge.height,
-      },
+  async personalizeFrameAssets(
+    sourceFrameId: string,
+    targetFrameId: string,
+    titleConfig: FrameTitleConfig,
+  ): Promise<{
+    svgUrl: string;
+    editorPreviewUrl: string;
+    thumbnails: {
+      small: string;
+      medium: string;
+      large: string;
+    };
+  }> {
+    const [sourceFrame, targetFrame, sourceAsset] = await Promise.all([
+      this.frameRepository.findOne({
+        where: { id: sourceFrameId },
+        select: ['id'],
+      }),
+      this.frameRepository.findOne({
+        where: { id: targetFrameId },
+      }),
+      this.frameAssetRepository.findOne({
+        where: {
+          frameId: sourceFrameId,
+          type: FrameAssetType.SVG,
+        },
+      }),
     ]);
 
-    await this.frameAssetRepository.save(assets);
+    if (!sourceFrame || !targetFrame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
 
-    frame.svgUrl = originalUpload.url;
-    frame.editorPreviewUrl = previewUpload.url;
-    frame.thumbnailUrl = mediumUpload.url;
-    await this.frameRepository.save(frame);
+    if (!sourceAsset) {
+      throw new NotFoundException({
+        code: 'FRAME_ASSET_NOT_FOUND',
+        message: 'Frame SVG asset is not available.',
+      });
+    }
 
-    await this.framesCacheService.invalidateFrame(frame.id, frame.slug);
+    const sourceSvg = (
+      await this.storageService.getObjectBuffer(sourceAsset.storageKey)
+    ).toString('utf8');
 
-    return {
-      svgUrl: originalUpload.url,
-      editorPreviewUrl: previewUpload.url,
-      thumbnails: {
-        small: smallUpload.url,
-        medium: mediumUpload.url,
-        large: largeUpload.url,
-      },
-    };
+    this.frameCompositorService.validateAspectRatio(
+      sourceSvg,
+      targetFrame.width,
+      targetFrame.height,
+    );
+
+    const personalizedSvg = this.applyConfiguredTitleOverlay(
+      targetFrame,
+      sourceSvg,
+      titleConfig,
+    );
+    const rendered =
+      await this.frameCompositorService.renderFrameAssetSet(personalizedSvg);
+
+    return this.persistRenderedAssets(targetFrame, rendered);
+  }
+
+  async cloneFrameAssets(
+    sourceFrameId: string,
+    targetFrameId: string,
+  ): Promise<void> {
+    const [sourceFrame, targetFrame, assets] = await Promise.all([
+      this.frameRepository.findOne({
+        where: { id: sourceFrameId },
+      }),
+      this.frameRepository.findOne({
+        where: { id: targetFrameId },
+      }),
+      this.frameAssetRepository.find({
+        where: { frameId: sourceFrameId },
+      }),
+    ]);
+
+    if (!sourceFrame || !targetFrame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    if (assets.length === 0) {
+      throw new NotFoundException({
+        code: 'FRAME_ASSET_NOT_FOUND',
+        message: 'Frame assets are not available for cloning.',
+      });
+    }
+
+    await this.frameAssetRepository.delete({ frameId: targetFrameId });
+
+    const clonedAssets: FrameAsset[] = [];
+    for (const asset of assets) {
+      const storageKey = this.resolveStorageKey(targetFrameId, asset.type);
+      await this.storageService.copyObject(asset.storageKey, storageKey);
+      clonedAssets.push(
+        this.frameAssetRepository.create({
+          frameId: targetFrameId,
+          type: asset.type,
+          storageKey,
+          mimeType: asset.mimeType,
+          fileSize: asset.fileSize,
+          width: asset.width,
+          height: asset.height,
+        }),
+      );
+    }
+
+    await this.frameAssetRepository.save(clonedAssets);
+
+    this.applyPublicAssetUrls(targetFrame, clonedAssets);
+    await this.frameRepository.save(targetFrame);
+    await this.framesCacheService.invalidateFrame(
+      targetFrame.id,
+      targetFrame.slug,
+    );
+  }
+
+  async deleteFrameAssets(frameId: string): Promise<void> {
+    const [frame, assets] = await Promise.all([
+      this.frameRepository.findOne({
+        where: { id: frameId },
+        select: ['id', 'slug'],
+      }),
+      this.frameAssetRepository.find({
+        where: { frameId },
+      }),
+    ]);
+
+    if (assets.length > 0) {
+      await this.storageService.deleteObjects(
+        assets.map((asset) => asset.storageKey),
+      );
+      await this.frameAssetRepository.delete({ frameId });
+    }
+
+    if (frame) {
+      await this.framesCacheService.invalidateFrame(frame.id, frame.slug);
+    }
   }
 
   async getSvgAssetInfo(frameId: string): Promise<FrameSvgAssetInfo> {
@@ -280,170 +381,408 @@ export class FrameAssetsService {
     };
   }
 
-  private sanitizeSvg(svg: string): string {
-    if (!svg || typeof svg !== 'string') {
-      throw new BadRequestException({
-        code: 'INVALID_SVG',
-        message: 'An SVG file is required.',
-      });
-    }
-
-    // Block dangerous XML constructs early
-    if (/<!DOCTYPE/i.test(svg)) {
-      throw new BadRequestException({
-        code: 'INVALID_SVG',
-        message: 'DOCTYPE is not allowed in SVG uploads.',
-      });
-    }
-
-    // Strict DOMPurify sanitization (allowlist only)
-    const clean = purify.sanitize(svg, {
-      USE_PROFILES: { svg: true },
-
-      // Only allow safe structural SVG elements
-      ALLOWED_TAGS: [
-        'svg',
-        'defs',
-        'g',
-        'path',
-        'circle',
-        'rect',
-        'line',
-        'polyline',
-        'polygon',
-        'ellipse',
-        'linearGradient',
-        'radialGradient',
-        'stop',
-      ],
-
-      // Only allow safe visual attributes
-      ALLOWED_ATTR: [
-        'd',
-        'fill',
-        'stroke',
-        'stroke-width',
-        'fill-rule',
-        'fill-opacity',
-        'stroke-opacity',
-        'stroke-linecap',
-        'stroke-linejoin',
-        'opacity',
-        'viewBox',
-        'width',
-        'height',
-        'id',
-        'cx',
-        'cy',
-        'r',
-        'x',
-        'y',
-        'rx',
-        'ry',
-        'points',
-        'x1',
-        'y1',
-        'x2',
-        'y2',
-        'offset',
-        'stop-color',
-        'stop-opacity',
-        'gradientUnits',
-        'gradientTransform',
-      ],
-
-      // Explicitly block all risky surfaces
-      FORBID_TAGS: [
-        'script',
-        'style',
-        'foreignObject',
-        'iframe',
-        'object',
-        'embed',
-        'use',
-        'image',
-        'feImage',
-      ],
-
-      FORBID_ATTR: ['on*', 'href', 'xlink:href', 'src', 'style'],
-
-      ALLOW_DATA_ATTR: false,
-      ALLOW_UNKNOWN_PROTOCOLS: false,
-      KEEP_CONTENT: false,
-      RETURN_TRUSTED_TYPE: false,
+  async getFrameRenderSourceInfo(
+    frameId: string,
+  ): Promise<FrameRenderSourceInfo> {
+    const frame = await this.frameRepository.findOne({
+      where: { id: frameId },
+      select: ['id', 'metadata', 'width', 'height'],
     });
 
-    // Structural validation (post-sanitize)
-    const dom = new JSDOM(clean, { contentType: 'image/svg+xml' });
-    const root = dom.window.document.documentElement;
-
-    if (!root || root.nodeName.toLowerCase() !== 'svg') {
-      throw new BadRequestException({
-        code: 'INVALID_SVG',
-        message: 'Uploaded file is not a valid SVG.',
+    if (!frame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
       });
     }
 
-    // Final hard check: kill any protocol usage
-    const serialized = new dom.window.XMLSerializer().serializeToString(
-      dom.window.document,
+    const renderMode = resolveFrameRenderMode(frame.metadata);
+    if (renderMode === 'scene') {
+      const placement = resolveFrameScenePlacement(frame.metadata);
+      const asset = await this.frameAssetRepository.findOne({
+        where: {
+          frameId,
+          type: FrameAssetType.SCENE_BASE_PNG,
+        },
+      });
+
+      if (!asset || !placement) {
+        throw new NotFoundException({
+          code: 'FRAME_ASSET_NOT_FOUND',
+          message: 'Scene frame render source is not available.',
+        });
+      }
+
+      return {
+        frameId: asset.frameId,
+        renderMode,
+        assetType: asset.type,
+        storageKey: asset.storageKey,
+        mimeType: asset.mimeType,
+        fileSize: asset.fileSize,
+        placement: snapshotFrameRenderPlacement(placement),
+        canvas: {
+          width: asset.width ?? frame.width,
+          height: asset.height ?? frame.height,
+        },
+      };
+    }
+
+    const svgAsset = await this.getSvgAssetInfo(frameId);
+    return {
+      frameId: svgAsset.frameId,
+      renderMode,
+      assetType: FrameAssetType.SVG,
+      storageKey: svgAsset.storageKey,
+      mimeType: svgAsset.mimeType,
+      fileSize: svgAsset.fileSize,
+      placement: snapshotFrameRenderPlacement(svgAsset.imagePlacement),
+      canvas: {
+        width: frame.width,
+        height: frame.height,
+      },
+    };
+  }
+
+  private applyConfiguredTitleOverlay(
+    frame: Frame,
+    svg: string,
+    overrideTitleConfig?: FrameTitleConfig,
+  ): string {
+    const titleConfig = this.prepareFrameTitleConfig(
+      frame,
+      svg,
+      overrideTitleConfig,
+    );
+    if (!titleConfig) {
+      return svg;
+    }
+
+    return this.frameCompositorService.composeTitleOverlay(
+      svg,
+      titleConfig,
+      frame.width,
+      frame.height,
+    );
+  }
+
+  private prepareFrameTitleConfig(
+    frame: Frame,
+    svg: string,
+    overrideTitleConfig?: FrameTitleConfig,
+  ): FrameTitleConfig | null {
+    const originalMetadata = normalizeFrameMetadata(frame.metadata ?? {});
+    const nextMetadata = normalizeFrameMetadata({
+      ...originalMetadata,
+      ...(overrideTitleConfig ? { titleConfig: overrideTitleConfig } : {}),
+    });
+
+    let imagePlacement = this.resolveConfiguredImagePlacement(nextMetadata);
+    if (!imagePlacement) {
+      const inferredPlacement =
+        this.frameCompositorService.inferImagePlacementFromSvg(
+          svg,
+          frame.width,
+          frame.height,
+        );
+      if (inferredPlacement) {
+        nextMetadata.imagePlacement =
+          snapshotFrameImagePlacement(inferredPlacement);
+        imagePlacement = inferredPlacement;
+      }
+    }
+
+    let titleConfig = resolveFrameTitleConfig(nextMetadata);
+    if (titleConfig && imagePlacement) {
+      titleConfig =
+        this.frameCompositorService.normalizeTitleConfigForImagePlacement(
+          titleConfig,
+          imagePlacement,
+        );
+      nextMetadata.titleConfig = titleConfig;
+    }
+
+    if (JSON.stringify(originalMetadata) !== JSON.stringify(nextMetadata)) {
+      frame.metadata = normalizeFrameMetadata(nextMetadata);
+    }
+
+    return titleConfig;
+  }
+
+  private resolveConfiguredImagePlacement(
+    metadata: Frame['metadata'],
+  ): FrameImagePlacement | null {
+    if (
+      !metadata ||
+      typeof metadata !== 'object' ||
+      metadata.imagePlacement === undefined
+    ) {
+      return null;
+    }
+
+    return resolveFrameImagePlacement(metadata);
+  }
+
+  private async persistRenderedAssets(
+    frame: Frame,
+    rendered: RenderedFrameAssetSet,
+  ): Promise<{
+    svgUrl: string;
+    editorPreviewUrl: string;
+    thumbnails: {
+      small: string;
+      medium: string;
+      large: string;
+    };
+  }> {
+    const originalUpload = await this.storageService.uploadBuffer(
+      this.resolveStorageKey(frame.id, FrameAssetType.SVG),
+      rendered.svgBuffer,
+      'image/svg+xml',
     );
 
-    if (/(javascript:|data:|blob:|file:)/i.test(serialized)) {
-      throw new BadRequestException({
-        code: 'INVALID_SVG',
-        message: 'SVG contains unsafe references.',
-      });
-    }
+    const [smallUpload, mediumUpload, largeUpload, previewUpload] =
+      await Promise.all([
+        this.storageService.uploadBuffer(
+          this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_SM),
+          rendered.thumbnails.small.buffer,
+          'image/png',
+        ),
+        this.storageService.uploadBuffer(
+          this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_MD),
+          rendered.thumbnails.medium.buffer,
+          'image/png',
+        ),
+        this.storageService.uploadBuffer(
+          this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_LG),
+          rendered.thumbnails.large.buffer,
+          'image/png',
+        ),
+        this.storageService.uploadBuffer(
+          this.resolveStorageKey(frame.id, FrameAssetType.PREVIEW_PNG),
+          rendered.preview.buffer,
+          'image/png',
+        ),
+      ]);
 
-    if (!serialized.includes('<svg')) {
-      throw new BadRequestException({
-        code: 'SANITIZATION_FAILED',
-        message: 'SVG could not be sanitized.',
-      });
-    }
+    await this.frameAssetRepository.delete({ frameId: frame.id });
 
-    return serialized;
-  }
+    const assets = this.frameAssetRepository.create([
+      {
+        frameId: frame.id,
+        type: FrameAssetType.SVG,
+        storageKey: originalUpload.key,
+        mimeType: 'image/svg+xml',
+        fileSize: originalUpload.size,
+        width: Math.round(rendered.svgCanvas.width),
+        height: Math.round(rendered.svgCanvas.height),
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.PREVIEW_PNG,
+        storageKey: previewUpload.key,
+        mimeType: 'image/png',
+        fileSize: previewUpload.size,
+        width: rendered.preview.width,
+        height: rendered.preview.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_SM,
+        storageKey: smallUpload.key,
+        mimeType: 'image/png',
+        fileSize: smallUpload.size,
+        width: rendered.thumbnails.small.width,
+        height: rendered.thumbnails.small.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_MD,
+        storageKey: mediumUpload.key,
+        mimeType: 'image/png',
+        fileSize: mediumUpload.size,
+        width: rendered.thumbnails.medium.width,
+        height: rendered.thumbnails.medium.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_LG,
+        storageKey: largeUpload.key,
+        mimeType: 'image/png',
+        fileSize: largeUpload.size,
+        width: rendered.thumbnails.large.width,
+        height: rendered.thumbnails.large.height,
+      },
+    ]);
 
-  private async createThumbnail(
-    svgBuffer: Buffer,
-    size: number,
-  ): Promise<{ buffer: Buffer; width: number; height: number }> {
-    const transformer = sharp(svgBuffer).resize(size, size, {
-      fit: 'inside',
-      withoutEnlargement: false,
-    });
+    await this.frameAssetRepository.save(assets);
 
-    const pngBuffer = await transformer.png().toBuffer();
-    const metadata = await sharp(pngBuffer).metadata();
+    this.applyPublicAssetUrls(frame, assets);
+    await this.frameRepository.save(frame);
+
+    await this.framesCacheService.invalidateFrame(frame.id, frame.slug);
 
     return {
-      buffer: pngBuffer,
-      width: metadata.width ?? size,
-      height: metadata.height ?? size,
+      svgUrl: originalUpload.url,
+      editorPreviewUrl: previewUpload.url,
+      thumbnails: {
+        small: smallUpload.url,
+        medium: mediumUpload.url,
+        large: largeUpload.url,
+      },
     };
   }
 
-  private async createEditorPreview(
-    svgBuffer: Buffer,
-    width: number,
-    height: number,
-  ): Promise<{ buffer: Buffer; width: number; height: number }> {
-    const pngBuffer = await sharp(svgBuffer, { density: 300 })
-      .resize(width, height, {
-        fit: 'fill',
-        withoutEnlargement: false,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .png()
-      .toBuffer();
-    const metadata = await sharp(pngBuffer).metadata();
+  private async persistRenderedSceneAssets(
+    frame: Frame,
+    rendered: RenderedSceneAssetSet,
+  ): Promise<{
+    editorPreviewUrl: string;
+    thumbnails: {
+      small: string;
+      medium: string;
+      large: string;
+    };
+  }> {
+    const [
+      sourceUpload,
+      smallUpload,
+      mediumUpload,
+      largeUpload,
+      previewUpload,
+    ] = await Promise.all([
+      this.storageService.uploadBuffer(
+        this.resolveStorageKey(frame.id, FrameAssetType.SCENE_BASE_PNG),
+        rendered.sourceBuffer,
+        'image/png',
+      ),
+      this.storageService.uploadBuffer(
+        this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_SM),
+        rendered.thumbnails.small.buffer,
+        'image/png',
+      ),
+      this.storageService.uploadBuffer(
+        this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_MD),
+        rendered.thumbnails.medium.buffer,
+        'image/png',
+      ),
+      this.storageService.uploadBuffer(
+        this.resolveStorageKey(frame.id, FrameAssetType.THUMBNAIL_LG),
+        rendered.thumbnails.large.buffer,
+        'image/png',
+      ),
+      this.storageService.uploadBuffer(
+        this.resolveStorageKey(frame.id, FrameAssetType.PREVIEW_PNG),
+        rendered.preview.buffer,
+        'image/png',
+      ),
+    ]);
+
+    await this.frameAssetRepository.delete({ frameId: frame.id });
+
+    const assets = this.frameAssetRepository.create([
+      {
+        frameId: frame.id,
+        type: FrameAssetType.SCENE_BASE_PNG,
+        storageKey: sourceUpload.key,
+        mimeType: 'image/png',
+        fileSize: sourceUpload.size,
+        width: rendered.sourceCanvas.width,
+        height: rendered.sourceCanvas.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.PREVIEW_PNG,
+        storageKey: previewUpload.key,
+        mimeType: 'image/png',
+        fileSize: previewUpload.size,
+        width: rendered.preview.width,
+        height: rendered.preview.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_SM,
+        storageKey: smallUpload.key,
+        mimeType: 'image/png',
+        fileSize: smallUpload.size,
+        width: rendered.thumbnails.small.width,
+        height: rendered.thumbnails.small.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_MD,
+        storageKey: mediumUpload.key,
+        mimeType: 'image/png',
+        fileSize: mediumUpload.size,
+        width: rendered.thumbnails.medium.width,
+        height: rendered.thumbnails.medium.height,
+      },
+      {
+        frameId: frame.id,
+        type: FrameAssetType.THUMBNAIL_LG,
+        storageKey: largeUpload.key,
+        mimeType: 'image/png',
+        fileSize: largeUpload.size,
+        width: rendered.thumbnails.large.width,
+        height: rendered.thumbnails.large.height,
+      },
+    ]);
+
+    await this.frameAssetRepository.save(assets);
+
+    this.applyPublicAssetUrls(frame, assets);
+    await this.frameRepository.save(frame);
+    await this.framesCacheService.invalidateFrame(frame.id, frame.slug);
 
     return {
-      buffer: pngBuffer,
-      width: metadata.width ?? width,
-      height: metadata.height ?? height,
+      editorPreviewUrl: previewUpload.url,
+      thumbnails: {
+        small: smallUpload.url,
+        medium: mediumUpload.url,
+        large: largeUpload.url,
+      },
     };
+  }
+
+  private applyPublicAssetUrls(
+    frame: Frame,
+    assets: Array<Partial<FrameAsset>>,
+  ): void {
+    const svgAsset = assets.find((asset) => asset.type === FrameAssetType.SVG);
+    const previewAsset = assets.find(
+      (asset) => asset.type === FrameAssetType.PREVIEW_PNG,
+    );
+    const thumbnailAsset = assets.find(
+      (asset) => asset.type === FrameAssetType.THUMBNAIL_MD,
+    );
+
+    frame.svgUrl = svgAsset?.storageKey
+      ? this.storageService.getPublicUrl(svgAsset.storageKey)
+      : null;
+    frame.editorPreviewUrl = previewAsset?.storageKey
+      ? this.storageService.getPublicUrl(previewAsset.storageKey)
+      : null;
+    frame.thumbnailUrl = thumbnailAsset?.storageKey
+      ? this.storageService.getPublicUrl(thumbnailAsset.storageKey)
+      : null;
+  }
+
+  private resolveStorageKey(frameId: string, type: FrameAssetType): string {
+    switch (type) {
+      case FrameAssetType.SVG:
+        return `frames/${frameId}/original.svg`;
+      case FrameAssetType.SCENE_BASE_PNG:
+        return `frames/${frameId}/scene-base.png`;
+      case FrameAssetType.PREVIEW_PNG:
+        return `frames/${frameId}/editor-preview.png`;
+      case FrameAssetType.THUMBNAIL_SM:
+        return `frames/${frameId}/thumbnail-sm.png`;
+      case FrameAssetType.THUMBNAIL_MD:
+        return `frames/${frameId}/thumbnail-md.png`;
+      case FrameAssetType.THUMBNAIL_LG:
+        return `frames/${frameId}/thumbnail-lg.png`;
+      default:
+        return `frames/${frameId}/asset`;
+    }
   }
 }

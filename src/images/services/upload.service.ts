@@ -10,6 +10,7 @@ import { DataSource, Repository } from 'typeorm';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const sharp: typeof import('sharp') = require('sharp');
 import { Album } from '../../albums/entities/album.entity';
+import { normalizeAlbumShortCodeLookup } from '../../albums/utils/album-shortcode.util';
 import { User } from '../../auth/entities/user.entity';
 import { BusinessException } from '../../common/filters/business.exception';
 import { StorageService } from '../../common/services/storage.service';
@@ -334,11 +335,14 @@ export class UploadService {
           frameId: frameState.frameId,
           frameSnapshotKey: frameState.frameSnapshotKey,
           frameSnapshotSize: frameState.frameSnapshotSize,
+          frameSnapshotAssetType: frameState.frameSnapshotAssetType,
           framePlacement: frameState.framePlacement,
           renderTransform,
           pendingFrameId: frameState.pendingFrameId,
           pendingFrameSnapshotKey: frameState.pendingFrameSnapshotKey,
           pendingFrameSnapshotSize: frameState.pendingFrameSnapshotSize,
+          pendingFrameSnapshotAssetType:
+            frameState.pendingFrameSnapshotAssetType,
           pendingFramePlacement: frameState.pendingFramePlacement,
           pendingRenderTransform: null,
           frameRenderStatus: frameState.frameRenderStatus,
@@ -697,10 +701,14 @@ export class UploadService {
   }
 
   private async resolveAlbum(shortCode: string): Promise<Album> {
-    const album = await this.albumRepository.findOne({
-      where: { shortCode },
-      select: ['id', 'frameId', 'isPublic'],
-    });
+    const normalizedShortCode = normalizeAlbumShortCodeLookup(shortCode);
+    const album = await this.albumRepository
+      .createQueryBuilder('album')
+      .select(['album.id', 'album.frameId', 'album.isPublic'])
+      .where('LOWER(album.shortCode) = LOWER(:shortCode)', {
+        shortCode: normalizedShortCode,
+      })
+      .getOne();
 
     if (!album) {
       throw new BusinessException(

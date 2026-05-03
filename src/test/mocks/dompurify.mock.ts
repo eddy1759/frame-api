@@ -17,7 +17,8 @@ function stripDangerousAttributes(svg: string): string {
 }
 
 function stripDangerousTags(svg: string): string {
-  const blocked = '(script|style|foreignobject|iframe|object|embed|use)';
+  const blocked =
+    '(script|style|foreignobject|iframe|object|embed|use|image|feimage)';
   let output = svg;
   output = output.replace(
     new RegExp(`<\\s*${blocked}\\b[\\s\\S]*?<\\/\\s*\\1\\s*>`, 'gi'),

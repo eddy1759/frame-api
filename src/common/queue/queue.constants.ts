@@ -1,6 +1,7 @@
 export const IMAGE_PROCESSING_QUEUE = 'image-processing';
 export const IMAGE_CLEANUP_QUEUE = 'image-cleanup';
 export const ALBUM_EVENTS_QUEUE = 'album-events';
+export const AI_FRAME_GENERATION_QUEUE = 'ai-frame-generation';
 
 export enum ImageProcessingJobType {
   PROCESS_IMAGE = 'process-image',
@@ -18,6 +19,10 @@ export enum AlbumEventJobType {
   IMAGE_ADDED = 'album.image.added',
   ANALYTICS_UPDATE = 'album.analytics.update',
   INDEX_UPDATE = 'album.index.update',
+}
+
+export enum AiFrameJobType {
+  GENERATE_ITERATION = 'generate-iteration',
 }
 
 export interface ImageProcessingJobData {
@@ -54,5 +59,15 @@ export interface AlbumAnalyticsJobData {
 
 export interface AlbumIndexUpdateJobData {
   albumId?: string;
-  reason?: 'album-created' | 'album-item-added';
+  reason?: 'album-created' | 'album-item-added' | 'album-updated';
+}
+
+export interface AiFrameGenerationJobData {
+  jobId: string;
+  iterationId: string;
+  iterationNumber: number;
+  userId: string;
+  prompt: string;
+  aspectRatio: string;
+  generationMode: 'overlay' | 'scene';
 }

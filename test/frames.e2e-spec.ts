@@ -57,6 +57,8 @@ const framesServiceMock = {
   listTags: jest.fn(),
   getFrameById: jest.fn(),
   getFrameSvgUrl: jest.fn(),
+  getFrameEditorPreviewUrl: jest.fn(),
+  customizeFrame: jest.fn(),
   recordApply: jest.fn(),
   saveFrame: jest.fn(),
   unsaveFrame: jest.fn(),
@@ -240,6 +242,19 @@ describe('Frames API (e2e)', () => {
     framesServiceMock.getFrameSvgUrl.mockResolvedValue({
       url: `http://localhost:9000/frame-assets/frames/${frameId}/original.svg`,
     });
+    framesServiceMock.getFrameEditorPreviewUrl.mockResolvedValue({
+      url: `http://localhost:9000/frame-assets/frames/${frameId}/editor-preview.png`,
+    });
+    framesServiceMock.customizeFrame.mockResolvedValue({
+      id: 'private-frame-1',
+      metadata: {
+        personalization: {
+          kind: 'title-customization',
+          sourceFrameId: frameId,
+          customTitle: 'Edet Wedding Anniversary',
+        },
+      },
+    });
     framesServiceMock.recordApply.mockResolvedValue(undefined);
     framesServiceMock.saveFrame.mockResolvedValue(undefined);
     framesServiceMock.unsaveFrame.mockResolvedValue(undefined);
@@ -318,6 +333,18 @@ describe('Frames API (e2e)', () => {
       });
   });
 
+  it('returns editor preview url without proxying content', () => {
+    return request(app.getHttpServer())
+      .get(`/api/v1/frames/${frameId}/editor-preview`)
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.url).toContain(
+          `/frames/${frameId}/editor-preview.png`,
+        );
+      });
+  });
+
   it('returns categories and category detail from public routes', () => {
     return request(app.getHttpServer())
       .get('/api/v1/frames/categories')
@@ -347,11 +374,11 @@ describe('Frames API (e2e)', () => {
       .then(() => {
         expect(framesServiceMock.getFrameBySlug).toHaveBeenCalledWith(
           'frame-1',
-          undefined,
+          null,
         );
         expect(framesServiceMock.getFrameById).toHaveBeenCalledWith(
           frameId,
-          undefined,
+          null,
         );
       });
   });
@@ -409,6 +436,34 @@ describe('Frames API (e2e)', () => {
           mockCurrentUser.id,
           1,
           20,
+        );
+      });
+  });
+
+  it('blocks frame customization without auth', () => {
+    return request(app.getHttpServer())
+      .post(`/api/v1/frames/${frameId}/customize`)
+      .send({ customTitle: 'Edet Wedding Anniversary' })
+      .expect(401);
+  });
+
+  it('creates a personalized private frame for an authenticated user', () => {
+    return request(app.getHttpServer())
+      .post(`/api/v1/frames/${frameId}/customize`)
+      .set('Authorization', 'Bearer valid-access-token')
+      .send({ customTitle: 'Edet Wedding Anniversary' })
+      .expect(201)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.id).toBe('private-frame-1');
+      })
+      .then(() => {
+        expect(framesServiceMock.customizeFrame).toHaveBeenCalledWith(
+          frameId,
+          mockCurrentUser,
+          expect.objectContaining({
+            customTitle: 'Edet Wedding Anniversary',
+          }),
         );
       });
   });

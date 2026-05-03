@@ -1,6 +1,8 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Brackets, In, Repository } from 'typeorm';
+import { User } from '../../auth/entities/user.entity';
+import { UserRole } from '../../auth/enums/user-role.enum';
 import { BusinessException } from '../../common/filters/business.exception';
 import { StorageService } from '../../common/services';
 import {
@@ -21,6 +23,10 @@ import { AlbumsCacheService } from './albums-cache.service';
 type AlbumMediaUrls = {
   thumbnailUrl: string | null;
   mediumUrl: string | null;
+};
+
+type AlbumMediaDetailUrls = AlbumMediaUrls & {
+  largeUrl: string | null;
 };
 
 type AlbumItemPageEntry = {
@@ -52,10 +58,14 @@ export class AlbumQueryService {
 
   async searchAlbums(
     query: QueryAlbumsDto,
+    viewer?: User,
   ): Promise<PaginatedResult<Record<string, unknown>>> {
-    const cached = await this.albumsCacheService.getSearch<
-      PaginatedResult<Record<string, unknown>>
-    >(this.toCacheParams(query));
+    const ownerScoped = this.isOwnerScopedSearch(query.ownerId, viewer);
+    const cacheParams = this.toCacheParams(query, ownerScoped, viewer);
+    const cached =
+      await this.albumsCacheService.getSearch<
+        PaginatedResult<Record<string, unknown>>
+      >(cacheParams);
 
     if (cached) {
       return cached;
@@ -65,9 +75,12 @@ export class AlbumQueryService {
     const qb = this.albumRepository
       .createQueryBuilder('album')
       .innerJoinAndSelect('album.owner', 'owner')
-      .innerJoinAndSelect('album.frame', 'frame')
-      .where('album.isPublic = :isPublic', { isPublic: true })
-      .andWhere(
+      .innerJoinAndSelect('album.frame', 'frame');
+
+    if (ownerScoped) {
+      qb.where('album.ownerId = :ownerId', { ownerId: query.ownerId });
+    } else {
+      qb.where('album.isPublic = :isPublic', { isPublic: true }).andWhere(
         `EXISTS (
           SELECT 1
           FROM album_items item
@@ -76,9 +89,10 @@ export class AlbumQueryService {
             AND image.is_deleted = false
         )`,
       );
+    }
 
     if (query.shortCode) {
-      qb.andWhere('album.shortCode = :shortCode', {
+      qb.andWhere('LOWER(album.shortCode) = LOWER(:shortCode)', {
         shortCode: query.shortCode,
       });
     }
@@ -95,6 +109,20 @@ export class AlbumQueryService {
       qb.andWhere('owner.displayName ILIKE :creator', {
         creator: `%${query.creator.trim()}%`,
       });
+    }
+
+    if (query.search) {
+      qb.andWhere(
+        new Brackets((searchQb) => {
+          searchQb
+            .where('album.name ILIKE :search', {
+              search: `%${query.search?.trim()}%`,
+            })
+            .orWhere('album.shortCode ILIKE :search', {
+              search: `%${query.search?.trim()}%`,
+            });
+        }),
+      );
     }
 
     qb.orderBy('album.createdAt', 'DESC')
@@ -144,26 +172,36 @@ export class AlbumQueryService {
       ),
     };
 
-    await this.albumsCacheService.setSearch(this.toCacheParams(query), result);
+    await this.albumsCacheService.setSearch(cacheParams, result);
     return result;
   }
 
-  async getAlbumDetail(shortCode: string): Promise<Record<string, unknown>> {
-    const cached =
-      await this.albumsCacheService.getAlbumByShortCode<
-        Record<string, unknown>
-      >(shortCode);
+  async getAlbumDetail(
+    shortCode: string,
+    viewer?: User,
+  ): Promise<Record<string, unknown>> {
+    const usePublicCache = !viewer;
+    if (usePublicCache) {
+      const cached =
+        await this.albumsCacheService.getAlbumByShortCode<
+          Record<string, unknown>
+        >(shortCode);
 
-    if (cached) {
-      return cached;
+      if (cached) {
+        return cached;
+      }
     }
 
-    const album = await this.getPublicAlbumByShortCode(shortCode);
+    const album = await this.getAccessibleAlbumByShortCode(shortCode, viewer);
     const stats = await this.getAlbumStats(album.id);
-    const previewItems = await this.listAlbumImagesInternal(album.id, {
-      page: 1,
-      limit: 6,
-    });
+    const previewItems = await this.listAlbumImagesInternal(
+      album.id,
+      {
+        page: 1,
+        limit: 6,
+      },
+      viewer,
+    );
 
     const detail = {
       id: album.id,
@@ -188,8 +226,13 @@ export class AlbumQueryService {
       previewItems: previewItems.data,
     };
 
-    await this.albumsCacheService.setAlbumById(album.id, detail);
-    await this.albumsCacheService.setAlbumByShortCode(album.shortCode, detail);
+    if (album.isPublic) {
+      await this.albumsCacheService.setAlbumById(album.id, detail);
+      await this.albumsCacheService.setAlbumByShortCode(
+        album.shortCode,
+        detail,
+      );
+    }
 
     return detail;
   }
@@ -197,29 +240,76 @@ export class AlbumQueryService {
   async listAlbumImages(
     albumId: string,
     query: QueryAlbumImagesDto,
+    viewer?: User,
   ): Promise<PaginatedResult<Record<string, unknown>>> {
-    await this.getPublicAlbumById(albumId);
+    const album = await this.getAccessibleAlbumById(albumId, viewer);
+    const usePublicCache = album.isPublic && !viewer;
 
-    const cached = await this.albumsCacheService.getAlbumItems<
-      PaginatedResult<Record<string, unknown>>
-    >(albumId, this.toCacheParams(query));
+    if (usePublicCache) {
+      const cached = await this.albumsCacheService.getAlbumItems<
+        PaginatedResult<Record<string, unknown>>
+      >(albumId, this.toCacheParams(query));
 
-    if (cached) {
-      return cached;
+      if (cached) {
+        return cached;
+      }
     }
 
-    const result = await this.listAlbumImagesInternal(albumId, query);
-    await this.albumsCacheService.setAlbumItems(
-      albumId,
-      this.toCacheParams(query),
-      result,
-    );
+    const result = await this.listAlbumImagesInternal(albumId, query, viewer);
+    if (usePublicCache) {
+      await this.albumsCacheService.setAlbumItems(
+        albumId,
+        this.toCacheParams(query),
+        result,
+      );
+    }
     return result;
+  }
+
+  async getAlbumImageDetail(
+    albumId: string,
+    imageId: string,
+    viewer?: User,
+  ): Promise<Record<string, unknown>> {
+    await this.getAccessibleAlbumById(albumId, viewer);
+
+    const item = await this.albumItemRepository
+      .createQueryBuilder('item')
+      .innerJoin('item.image', 'image')
+      .where('item.albumId = :albumId', { albumId })
+      .andWhere('item.imageId = :imageId', { imageId })
+      .andWhere('image.isDeleted = :isDeleted', { isDeleted: false })
+      .getOne();
+
+    if (!item) {
+      throw new BusinessException(
+        'ALBUM_IMAGE_NOT_FOUND',
+        'Album image not found.',
+        HttpStatus.NOT_FOUND,
+      );
+    }
+
+    const media = await this.resolveMediaForAlbumImageDetail(item);
+
+    return {
+      id: item.id,
+      albumId: item.albumId,
+      imageId: item.imageId,
+      frameId: item.frameId,
+      userId: item.userId,
+      imageRenderRevision: item.imageRenderRevision,
+      thumbnailUrl: media.thumbnailUrl,
+      mediumUrl: media.mediumUrl,
+      largeUrl: media.largeUrl,
+      createdAt: item.createdAt,
+      isImageOwner: this.isImageOwner(item.userId, viewer),
+    };
   }
 
   private async listAlbumImagesInternal(
     albumId: string,
     query: QueryAlbumImagesDto,
+    viewer?: User,
   ): Promise<PaginatedResult<Record<string, unknown>>> {
     const pagination = this.paginationService.resolve(query);
 
@@ -260,6 +350,7 @@ export class AlbumQueryService {
           thumbnailUrl: urls.thumbnailUrl,
           mediumUrl: urls.mediumUrl,
           createdAt: item.createdAt,
+          isImageOwner: this.isImageOwner(item.userId, viewer),
         };
       }),
       meta: this.paginationService.buildMeta(
@@ -270,35 +361,35 @@ export class AlbumQueryService {
     };
   }
 
-  private async getPublicAlbumByShortCode(shortCode: string): Promise<Album> {
+  private async getAccessibleAlbumByShortCode(
+    shortCode: string,
+    viewer?: User,
+  ): Promise<Album> {
     const album = await this.albumRepository
       .createQueryBuilder('album')
       .innerJoinAndSelect('album.owner', 'owner')
       .innerJoinAndSelect('album.frame', 'frame')
-      .where('album.shortCode = :shortCode', { shortCode })
-      .andWhere('album.isPublic = :isPublic', { isPublic: true })
+      .where('LOWER(album.shortCode) = LOWER(:shortCode)', { shortCode })
       .getOne();
 
-    if (!album) {
-      throw new BusinessException(
-        'ALBUM_NOT_FOUND',
-        'Album not found.',
-        HttpStatus.NOT_FOUND,
-      );
-    }
-
-    return album;
+    return this.assertAlbumVisible(album, viewer);
   }
 
-  private async getPublicAlbumById(albumId: string): Promise<Album> {
+  private async getAccessibleAlbumById(
+    albumId: string,
+    viewer?: User,
+  ): Promise<Album> {
     const album = await this.albumRepository
       .createQueryBuilder('album')
       .innerJoinAndSelect('album.owner', 'owner')
       .innerJoinAndSelect('album.frame', 'frame')
       .where('album.id = :albumId', { albumId })
-      .andWhere('album.isPublic = :isPublic', { isPublic: true })
       .getOne();
 
+    return this.assertAlbumVisible(album, viewer);
+  }
+
+  private assertAlbumVisible(album: Album | null, viewer?: User): Album {
     if (!album) {
       throw new BusinessException(
         'ALBUM_NOT_FOUND',
@@ -307,7 +398,39 @@ export class AlbumQueryService {
       );
     }
 
-    return album;
+    if (
+      album.isPublic ||
+      (viewer &&
+        (viewer.role === UserRole.ADMIN || viewer.id === album.ownerId))
+    ) {
+      return album;
+    }
+
+    throw new BusinessException(
+      'ALBUM_NOT_FOUND',
+      'Album not found.',
+      HttpStatus.NOT_FOUND,
+    );
+  }
+
+  private isOwnerScopedSearch(ownerId?: string, viewer?: User): boolean {
+    return Boolean(
+      ownerId &&
+      viewer &&
+      (viewer.id === ownerId || viewer.role === UserRole.ADMIN),
+    );
+  }
+
+  private toCacheParams(
+    query: QueryAlbumsDto | QueryAlbumImagesDto,
+    ownerScoped = false,
+    viewer?: User,
+  ): Record<string, unknown> {
+    return {
+      ...query,
+      ownerScoped,
+      viewerId: ownerScoped ? (viewer?.id ?? null) : null,
+    };
   }
 
   private async getAlbumStats(
@@ -463,6 +586,77 @@ export class AlbumQueryService {
     return new Map(mediaEntries);
   }
 
+  private async resolveMediaForAlbumImageDetail(
+    item: Pick<AlbumItemPageEntry, 'imageId' | 'imageRenderRevision'>,
+  ): Promise<AlbumMediaDetailUrls> {
+    const variantTypes = [
+      VariantType.THUMBNAIL,
+      VariantType.MEDIUM,
+      VariantType.LARGE,
+    ];
+
+    const renderVariants = await this.imageRenderVariantRepository.find({
+      where: {
+        imageId: item.imageId,
+        renderRevision: item.imageRenderRevision,
+        variantType: In(variantTypes),
+      },
+    });
+
+    const baseVariants = await this.imageVariantRepository.find({
+      where: {
+        imageId: item.imageId,
+        variantType: In(variantTypes),
+      },
+    });
+
+    const renderMap = new Map<VariantType, ImageRenderVariant>();
+    const baseMap = new Map<VariantType, ImageVariant>();
+
+    for (const variant of renderVariants) {
+      renderMap.set(variant.variantType, variant);
+    }
+
+    for (const variant of baseVariants) {
+      baseMap.set(variant.variantType, variant);
+    }
+
+    const thumbnailVariant =
+      renderMap.get(VariantType.THUMBNAIL) ??
+      baseMap.get(VariantType.THUMBNAIL) ??
+      null;
+    const mediumVariant =
+      renderMap.get(VariantType.MEDIUM) ??
+      baseMap.get(VariantType.MEDIUM) ??
+      thumbnailVariant;
+    const largeVariant =
+      renderMap.get(VariantType.LARGE) ??
+      baseMap.get(VariantType.LARGE) ??
+      mediumVariant;
+
+    const thumbnailUrl = thumbnailVariant
+      ? await this.storageService.generatePresignedGetUrl(
+          thumbnailVariant.storageKey,
+        )
+      : null;
+    const mediumUrl = mediumVariant
+      ? await this.storageService.generatePresignedGetUrl(
+          mediumVariant.storageKey,
+        )
+      : thumbnailUrl;
+    const largeUrl = largeVariant
+      ? await this.storageService.generatePresignedGetUrl(
+          largeVariant.storageKey,
+        )
+      : mediumUrl;
+
+    return {
+      thumbnailUrl,
+      mediumUrl,
+      largeUrl,
+    };
+  }
+
   private formatFrameSummary(frame: Frame): Record<string, unknown> {
     return {
       id: frame.id,
@@ -481,9 +675,7 @@ export class AlbumQueryService {
     };
   }
 
-  private toCacheParams(
-    query: QueryAlbumsDto | QueryAlbumImagesDto,
-  ): Record<string, unknown> {
-    return { ...query };
+  private isImageOwner(imageUserId: string, viewer?: User): boolean {
+    return Boolean(viewer && viewer.id === imageUserId);
   }
 }

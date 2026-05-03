@@ -84,9 +84,23 @@ export class CreateFrameDto {
           height: 0.7778,
         },
       },
+      titleConfig: {
+        text: 'Wedding Anniversary',
+        fontFamily: 'Playfair Display',
+        fontWeight: 700,
+        fontSizeRatio: 0.05,
+        color: '#ffffff',
+        position: {
+          x: 0.18,
+          y: 0.84,
+          width: 0.64,
+          height: 0.08,
+        },
+        align: 'center',
+      },
     },
     description:
-      'Optional frame metadata. When provided, `imagePlacement` defines the normalized photo window used for framed image rendering.',
+      'Optional frame metadata. `imagePlacement` defines the normalized photo window used for framed image rendering, while `titleConfig` defines backend-rendered text placement for titled frames.',
   })
   @IsOptional()
   @IsObject()

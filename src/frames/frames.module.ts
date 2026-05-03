@@ -21,6 +21,7 @@ import {
 import {
   CategoriesService,
   FrameAssetsService,
+  FrameCompositorService,
   FramesCacheService,
   FramesService,
   FramesWarmupService,
@@ -55,6 +56,7 @@ import { AdminGuard, OptionalJwtGuard } from '../auth/guards';
     CategoriesService,
     TagsService,
     FrameAssetsService,
+    FrameCompositorService,
     FramesCacheService,
     FramesWarmupService,
     FramesSyncCron,
@@ -63,6 +65,13 @@ import { AdminGuard, OptionalJwtGuard } from '../auth/guards';
     PremiumFrameGuard,
     AuthThrottleGuard,
   ],
-  exports: [FramesService, CategoriesService, TagsService, FrameAssetsService],
+  exports: [
+    FramesService,
+    CategoriesService,
+    TagsService,
+    FrameAssetsService,
+    FrameCompositorService,
+    FramesCacheService,
+  ],
 })
 export class FramesModule {}

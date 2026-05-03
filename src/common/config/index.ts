@@ -7,3 +7,4 @@ export { validate } from './env.validation';
 
 export { default as storageConfig } from './storage.config';
 export { imageConfig } from './storage.config';
+export { default as aiConfig } from './ai.config';

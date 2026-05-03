@@ -10,6 +10,10 @@ export interface StorageConfig {
   forcePathStyle: boolean;
   useSsl: boolean;
   cdnBaseUrl: string;
+  connectionTimeoutMs: number;
+  socketTimeoutMs: number;
+  uploadMaxAttempts: number;
+  uploadBaseDelayMs: number;
 }
 
 export default registerAs(
@@ -30,6 +34,22 @@ export default registerAs(
     useSsl: (process.env.OBJECT_STORAGE_USE_SSL || 'false') === 'true',
     cdnBaseUrl:
       process.env.CDN_BASE_URL || 'http://localhost:9000/frame-assets',
+    connectionTimeoutMs: parseInt(
+      process.env.OBJECT_STORAGE_CONNECTION_TIMEOUT_MS || '5000',
+      10,
+    ),
+    socketTimeoutMs: parseInt(
+      process.env.OBJECT_STORAGE_SOCKET_TIMEOUT_MS || '20000',
+      10,
+    ),
+    uploadMaxAttempts: parseInt(
+      process.env.OBJECT_STORAGE_UPLOAD_MAX_ATTEMPTS || '4',
+      10,
+    ),
+    uploadBaseDelayMs: parseInt(
+      process.env.OBJECT_STORAGE_UPLOAD_BASE_DELAY_MS || '1000',
+      10,
+    ),
   }),
 );
 

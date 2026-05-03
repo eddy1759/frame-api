@@ -21,6 +21,7 @@ import {
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { OAuthLoginDto } from './dto/oauth-login.dto';
+import { AdminSignInDto } from './dto/admin-signin.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Public } from './decorators/public.decorator';
@@ -50,6 +51,48 @@ export class AuthController {
   // ═══════════════════════════════════════════
   // OAuth Login
   // ═══════════════════════════════════════════
+
+  @Public()
+  @Post('admin/signin')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Sign in an admin user with email and password' })
+  @ApiResponse({ status: 200, description: 'Successfully authenticated' })
+  @ApiResponse({ status: 401, description: 'Invalid admin credentials' })
+  @ApiResponse({ status: 429, description: 'Rate limit exceeded' })
+  async adminSignIn(
+    @Body() dto: AdminSignInDto,
+    @Req() req: Request,
+  ): Promise<AuthResponse> {
+    await this.throttleGuard.checkRateLimit(req, {
+      limit: 5,
+      ttlSeconds: 300,
+    });
+
+    const ip: string = req.ip ?? 'unknown';
+    const emailKey = this.getAdminEmailThrottleKey(dto.email);
+
+    await this.bruteForceGuard.checkBruteForce(ip);
+    await this.bruteForceGuard.checkBruteForce(emailKey);
+
+    try {
+      const result = await this.authService.adminPasswordSignIn(
+        dto.email,
+        dto.password,
+        dto.deviceInfo,
+        ip,
+      );
+
+      await this.bruteForceGuard.resetAttempts(ip);
+      await this.bruteForceGuard.resetAttempts(emailKey);
+      return result;
+    } catch (error: unknown) {
+      if (this.isUnauthorizedError(error)) {
+        await this.bruteForceGuard.recordFailedAttempt(ip);
+        await this.bruteForceGuard.recordFailedAttempt(emailKey);
+      }
+      throw error;
+    }
+  }
 
   @Public()
   @Post('google')
@@ -298,5 +341,9 @@ export class AuthController {
       return (error as { status: number }).status === 401;
     }
     return false;
+  }
+
+  private getAdminEmailThrottleKey(email: string): string {
+    return `admin-email:${email.trim().toLowerCase()}`;
   }
 }

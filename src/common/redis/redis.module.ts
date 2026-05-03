@@ -21,8 +21,10 @@ import { REDIS_CLIENT } from './redis.constants';
         const redis = new Redis({
           host: config.host,
           port: config.port,
+          username: config.username,
           password: config.password,
           db: config.db,
+          tls: config.tls,
           keyPrefix: config.keyPrefix,
           retryStrategy(times: number): number | null {
             if (times > 10) {

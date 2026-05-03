@@ -80,6 +80,7 @@ export class ImagesService {
       activeRenderRevision: image.activeRenderRevision,
       renderTransform: this.resolveActiveTransformForResponse(image),
       pendingRenderTransform: this.resolvePendingTransformForResponse(image),
+      finalRender: await this.imageCompositingService.resolveFinalRender(image),
       thumbnailUrl: await this.imageCompositingService.resolveThumbnailUrl(
         image,
         variants,
@@ -185,6 +186,8 @@ export class ImagesService {
           renderTransform: this.resolveActiveTransformForResponse(image),
           pendingRenderTransform:
             this.resolvePendingTransformForResponse(image),
+          finalRender:
+            await this.imageCompositingService.resolveFinalRender(image),
           mimeType: image.mimeType,
           createdAt: image.createdAt,
         };
@@ -372,24 +375,27 @@ export class ImagesService {
     dto: ReprocessImageDto = {},
   ): Promise<{
     imageId: string;
+    frameId: string | null;
     frameRenderStatus: FrameRenderStatus;
     pendingFrameId: string | null;
+    activeRenderRevision: number;
+    queued: boolean;
     message: string;
   }> {
     return this.imageCompositingService.requestReprocess(imageId, user, dto);
   }
 
-  async deleteImage(imageId: string, userId: string): Promise<void> {
+  async deleteImage(imageId: string, userId: string): Promise<null> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId, userId },
     });
 
     if (!image) {
-      return;
+      return null;
     }
 
     if (image.isDeleted) {
-      return;
+      return null;
     }
 
     const variants =
@@ -422,6 +428,8 @@ export class ImagesService {
     this.logger.log(
       `Image soft-deleted: ${imageId}, reclaimed ${totalBytes} bytes for user ${userId}`,
     );
+
+    return null;
   }
 
   async batchGetImages(userId: string, dto: BatchGetImagesDto) {
@@ -461,6 +469,8 @@ export class ImagesService {
           renderTransform: this.resolveActiveTransformForResponse(image),
           pendingRenderTransform:
             this.resolvePendingTransformForResponse(image),
+          finalRender:
+            await this.imageCompositingService.resolveFinalRender(image),
           mimeType: image.mimeType,
           isPublic: image.isPublic,
           createdAt: image.createdAt,

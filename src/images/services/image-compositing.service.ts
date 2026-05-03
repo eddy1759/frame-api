@@ -17,11 +17,17 @@ import {
 } from '../../common/queue/queue.constants';
 import { RedisService } from '../../common/redis/redis.service';
 import { StorageService } from '../../common/services/storage.service';
+import { FrameAssetType } from '../../frames/entities/frame-asset-type.enum';
 import { FrameAssetsService } from '../../frames/services/frame-assets.service';
 import {
   DEFAULT_FRAME_IMAGE_PLACEMENT,
   FrameImagePlacement,
+  FrameRenderPlacement,
+  FrameScenePlacement,
+  isDefaultFrameImagePlacement,
+  isFrameScenePlacement,
   snapshotFrameImagePlacement,
+  snapshotFrameRenderPlacement,
 } from '../../frames/utils/frame-metadata.util';
 import {
   extractSvgCanvasDimensions,
@@ -30,7 +36,11 @@ import {
 import { Image } from '../entities/image.entity';
 import { ImageRenderVariant } from '../entities/image-render-variant.entity';
 import { ImageVariant } from '../entities/image-variant.entity';
-import { FrameRenderStatus, VariantType } from '../types/image.types';
+import {
+  FrameRenderStatus,
+  ProcessingStatus,
+  VariantType,
+} from '../types/image.types';
 import { ImagesCacheService } from './images-cache.service';
 import { ImageRenderVariantService } from './image-render-variant.service';
 import { StorageQuotaService } from './storage-quota.service';
@@ -57,12 +67,14 @@ interface FrameStateSnapshot {
   frameId: string | null;
   frameSnapshotKey: string | null;
   frameSnapshotSize: number | null;
-  framePlacement: FrameImagePlacement | null;
+  frameSnapshotAssetType: FrameAssetType | null;
+  framePlacement: FrameRenderPlacement | null;
   renderTransform: RenderTransformV1 | null;
   pendingFrameId: string | null;
   pendingFrameSnapshotKey: string | null;
   pendingFrameSnapshotSize: number | null;
-  pendingFramePlacement: FrameImagePlacement | null;
+  pendingFrameSnapshotAssetType: FrameAssetType | null;
+  pendingFramePlacement: FrameRenderPlacement | null;
   pendingRenderTransform: RenderTransformV1 | null;
   frameRenderStatus: FrameRenderStatus;
   activeRenderRevision: number;
@@ -76,10 +88,12 @@ interface PendingFrameChangeResult {
 }
 
 interface RenderSourceContext {
+  renderMode: 'overlay' | 'scene';
+  frameSnapshotAssetType: FrameAssetType;
   originalBuffer: Buffer;
   snapshotBuffer: Buffer;
-  frameCanvas: SvgCanvasDimensions;
-  placement: FrameImagePlacement;
+  canvas: SvgCanvasDimensions;
+  placement: FrameRenderPlacement;
   sourceWidth: number;
   sourceHeight: number;
   transform: RenderTransformV1;
@@ -112,11 +126,13 @@ export class ImageCompositingService {
         frameId: null,
         frameSnapshotKey: null,
         frameSnapshotSize: null,
+        frameSnapshotAssetType: null,
         framePlacement: null,
         renderTransform: null,
         pendingFrameId: null,
         pendingFrameSnapshotKey: null,
         pendingFrameSnapshotSize: null,
+        pendingFrameSnapshotAssetType: null,
         pendingFramePlacement: null,
         pendingRenderTransform: null,
         frameRenderStatus: FrameRenderStatus.NONE,
@@ -124,22 +140,32 @@ export class ImageCompositingService {
       };
     }
 
-    const svgAsset = await this.frameAssetsService.getSvgAssetInfo(frameId);
-    const frameSnapshotKey = this.buildFrameSnapshotKey(imageId, 1);
-    await this.storageService.copyObject(svgAsset.storageKey, frameSnapshotKey);
+    const renderSource =
+      await this.frameAssetsService.getFrameRenderSourceInfo(frameId);
+    const frameSnapshotKey = this.buildFrameSnapshotKey(
+      imageId,
+      1,
+      renderSource.assetType,
+    );
+    await this.storageService.copyObject(
+      renderSource.storageKey,
+      frameSnapshotKey,
+    );
 
     return {
       frameId,
       frameSnapshotKey,
-      frameSnapshotSize: svgAsset.fileSize,
-      framePlacement: snapshotFrameImagePlacement(svgAsset.imagePlacement),
+      frameSnapshotSize: renderSource.fileSize,
+      frameSnapshotAssetType: renderSource.assetType,
+      framePlacement: snapshotFrameRenderPlacement(renderSource.placement),
       renderTransform: null,
       pendingFrameId: null,
       pendingFrameSnapshotKey: null,
       pendingFrameSnapshotSize: null,
+      pendingFrameSnapshotAssetType: null,
       pendingFramePlacement: null,
       pendingRenderTransform: null,
-      frameRenderStatus: FrameRenderStatus.READY,
+      frameRenderStatus: FrameRenderStatus.PROCESSING,
       activeRenderRevision: 1,
     };
   }
@@ -159,6 +185,7 @@ export class ImageCompositingService {
           pendingFrameId: null,
           pendingFrameSnapshotKey: null,
           pendingFrameSnapshotSize: null,
+          pendingFrameSnapshotAssetType: null,
           pendingFramePlacement: null,
           pendingRenderTransform: null,
           frameRenderStatus: image.frameId
@@ -171,14 +198,16 @@ export class ImageCompositingService {
       };
     }
 
-    const svgAsset = await this.frameAssetsService.getSvgAssetInfo(nextFrameId);
+    const renderSource =
+      await this.frameAssetsService.getFrameRenderSourceInfo(nextFrameId);
     const nextRevision = this.getNextRenderRevision(image.activeRenderRevision);
     const pendingSnapshotKey = this.buildFrameSnapshotKey(
       image.id,
       nextRevision,
+      renderSource.assetType,
     );
     await this.storageService.copyObject(
-      svgAsset.storageKey,
+      renderSource.storageKey,
       pendingSnapshotKey,
     );
 
@@ -186,14 +215,15 @@ export class ImageCompositingService {
       updateData: {
         pendingFrameId: nextFrameId,
         pendingFrameSnapshotKey: pendingSnapshotKey,
-        pendingFrameSnapshotSize: svgAsset.fileSize,
-        pendingFramePlacement: snapshotFrameImagePlacement(
-          svgAsset.imagePlacement,
+        pendingFrameSnapshotSize: renderSource.fileSize,
+        pendingFrameSnapshotAssetType: renderSource.assetType,
+        pendingFramePlacement: snapshotFrameRenderPlacement(
+          renderSource.placement,
         ),
         pendingRenderTransform: null,
         frameRenderStatus: FrameRenderStatus.PENDING_REPROCESS,
       },
-      quotaAddBytes: svgAsset.fileSize,
+      quotaAddBytes: renderSource.fileSize,
       quotaReclaimBytes,
       deleteSnapshotKeys,
     };
@@ -205,6 +235,7 @@ export class ImageCompositingService {
         pendingFrameId: null,
         pendingFrameSnapshotKey: null,
         pendingFrameSnapshotSize: null,
+        pendingFrameSnapshotAssetType: null,
         pendingFramePlacement: null,
         pendingRenderTransform: null,
         frameRenderStatus: image.frameId
@@ -225,17 +256,23 @@ export class ImageCompositingService {
     options: { expectedActiveRenderRevision?: number } = {},
   ): Promise<{
     imageId: string;
+    frameId: string | null;
     frameRenderStatus: FrameRenderStatus;
     pendingFrameId: string | null;
+    activeRenderRevision: number;
+    queued: boolean;
     message: string;
   }> {
     let oldSnapshotKey: string | null = null;
     let oldSnapshotSize = 0;
     let newSnapshotKey: string | null = null;
-    let response: {
+    let response = {} as {
       imageId: string;
+      frameId: string | null;
       frameRenderStatus: FrameRenderStatus;
       pendingFrameId: string | null;
+      activeRenderRevision: number;
+      queued: boolean;
       message: string;
     };
 
@@ -290,22 +327,30 @@ export class ImageCompositingService {
             lockedImage.frameSnapshotKey = lockedImage.pendingFrameSnapshotKey;
             lockedImage.frameSnapshotSize =
               lockedImage.pendingFrameSnapshotSize;
+            lockedImage.frameSnapshotAssetType =
+              lockedImage.pendingFrameSnapshotAssetType;
             lockedImage.framePlacement = lockedImage.pendingFramePlacement;
             lockedImage.renderTransform = lockedImage.pendingRenderTransform;
             lockedImage.pendingFrameId = null;
             lockedImage.pendingFrameSnapshotKey = null;
             lockedImage.pendingFrameSnapshotSize = null;
+            lockedImage.pendingFrameSnapshotAssetType = null;
             lockedImage.pendingFramePlacement = null;
             lockedImage.pendingRenderTransform = null;
-            lockedImage.frameRenderStatus = FrameRenderStatus.READY;
+            lockedImage.frameRenderStatus = FrameRenderStatus.PROCESSING;
             lockedImage.activeRenderRevision = this.getNextRenderRevision(
               lockedImage.activeRenderRevision,
             );
+            lockedImage.processingStatus = ProcessingStatus.PROCESSING;
+            lockedImage.processingError = null;
 
             response = {
               imageId,
+              frameId: lockedImage.frameId,
               frameRenderStatus: lockedImage.frameRenderStatus,
               pendingFrameId: lockedImage.pendingFrameId,
+              activeRenderRevision: lockedImage.activeRenderRevision,
+              queued: true,
               message:
                 'Pending frame change promoted and render refresh queued.',
             };
@@ -314,16 +359,27 @@ export class ImageCompositingService {
             lockedImage.frameId
           ) {
             lockedImage.renderTransform = lockedImage.pendingRenderTransform;
+            if (
+              this.shouldRefreshCurrentPlacement(lockedImage.framePlacement)
+            ) {
+              lockedImage.framePlacement =
+                await this.resolveCurrentFramePlacement(lockedImage);
+            }
             lockedImage.pendingRenderTransform = null;
-            lockedImage.frameRenderStatus = FrameRenderStatus.READY;
+            lockedImage.frameRenderStatus = FrameRenderStatus.PROCESSING;
             lockedImage.activeRenderRevision = this.getNextRenderRevision(
               lockedImage.activeRenderRevision,
             );
+            lockedImage.processingStatus = ProcessingStatus.PROCESSING;
+            lockedImage.processingError = null;
 
             response = {
               imageId,
+              frameId: lockedImage.frameId,
               frameRenderStatus: lockedImage.frameRenderStatus,
               pendingFrameId: lockedImage.pendingFrameId,
+              activeRenderRevision: lockedImage.activeRenderRevision,
+              queued: true,
               message:
                 'Pending transform change promoted and render refresh queued.',
             };
@@ -333,22 +389,29 @@ export class ImageCompositingService {
             lockedImage.frameId = null;
             lockedImage.frameSnapshotKey = null;
             lockedImage.frameSnapshotSize = null;
+            lockedImage.frameSnapshotAssetType = null;
             lockedImage.framePlacement = null;
             lockedImage.renderTransform = null;
             lockedImage.pendingFrameId = null;
             lockedImage.pendingFrameSnapshotKey = null;
             lockedImage.pendingFrameSnapshotSize = null;
+            lockedImage.pendingFrameSnapshotAssetType = null;
             lockedImage.pendingFramePlacement = null;
             lockedImage.pendingRenderTransform = null;
             lockedImage.frameRenderStatus = FrameRenderStatus.NONE;
             lockedImage.activeRenderRevision = this.getNextRenderRevision(
               lockedImage.activeRenderRevision,
             );
+            lockedImage.processingStatus = ProcessingStatus.COMPLETED;
+            lockedImage.processingError = null;
 
             response = {
               imageId,
+              frameId: lockedImage.frameId,
               frameRenderStatus: lockedImage.frameRenderStatus,
               pendingFrameId: lockedImage.pendingFrameId,
+              activeRenderRevision: lockedImage.activeRenderRevision,
+              queued: false,
               message:
                 'Pending frame removal promoted. Raw image variants remain active.',
             };
@@ -356,55 +419,72 @@ export class ImageCompositingService {
             lockedImage.frameRenderStatus = FrameRenderStatus.NONE;
             response = {
               imageId,
+              frameId: lockedImage.frameId,
               frameRenderStatus: lockedImage.frameRenderStatus,
               pendingFrameId: lockedImage.pendingFrameId,
+              activeRenderRevision: lockedImage.activeRenderRevision,
+              queued: false,
               message: 'No pending frame change was available to promote.',
             };
           }
         } else if (
-          this.canUseRenderedVariants(lockedImage) &&
+          this.hasActiveFrameRenderState(lockedImage) &&
           lockedImage.frameId
         ) {
           const nextRevision = this.getNextRenderRevision(
             lockedImage.activeRenderRevision,
           );
-          const svgAsset = await this.frameAssetsService.getSvgAssetInfo(
-            lockedImage.frameId,
-          );
+          const renderSource =
+            await this.frameAssetsService.getFrameRenderSourceInfo(
+              lockedImage.frameId,
+            );
 
-          newSnapshotKey = this.buildFrameSnapshotKey(imageId, nextRevision);
+          newSnapshotKey = this.buildFrameSnapshotKey(
+            imageId,
+            nextRevision,
+            renderSource.assetType,
+          );
           await this.storageService.copyObject(
-            svgAsset.storageKey,
+            renderSource.storageKey,
             newSnapshotKey,
           );
           await this.storageQuotaService.addVariantUsage(
             lockedImage.userId,
-            Number(svgAsset.fileSize),
+            Number(renderSource.fileSize),
             manager,
           );
 
           oldSnapshotKey = lockedImage.frameSnapshotKey;
           oldSnapshotSize = Number(lockedImage.frameSnapshotSize ?? 0);
           lockedImage.frameSnapshotKey = newSnapshotKey;
-          lockedImage.frameSnapshotSize = svgAsset.fileSize;
-          lockedImage.framePlacement = snapshotFrameImagePlacement(
-            svgAsset.imagePlacement,
+          lockedImage.frameSnapshotSize = renderSource.fileSize;
+          lockedImage.frameSnapshotAssetType = renderSource.assetType;
+          lockedImage.framePlacement = snapshotFrameRenderPlacement(
+            renderSource.placement,
           );
           lockedImage.activeRenderRevision = nextRevision;
-          lockedImage.frameRenderStatus = FrameRenderStatus.READY;
+          lockedImage.frameRenderStatus = FrameRenderStatus.PROCESSING;
+          lockedImage.processingStatus = ProcessingStatus.PROCESSING;
+          lockedImage.processingError = null;
 
           response = {
             imageId,
+            frameId: lockedImage.frameId,
             frameRenderStatus: lockedImage.frameRenderStatus,
             pendingFrameId: lockedImage.pendingFrameId,
+            activeRenderRevision: lockedImage.activeRenderRevision,
+            queued: true,
             message:
               'Current frame snapshot refreshed and render refresh queued.',
           };
         } else {
           response = {
             imageId,
+            frameId: lockedImage.frameId,
             frameRenderStatus: lockedImage.frameRenderStatus,
             pendingFrameId: lockedImage.pendingFrameId,
+            activeRenderRevision: lockedImage.activeRenderRevision,
+            queued: false,
             message: 'Image has no active frame render to refresh.',
           };
         }
@@ -432,10 +512,12 @@ export class ImageCompositingService {
     if (imageForQueue) {
       await this.imagesCacheService.invalidateImage(imageForQueue.id);
       await this.imagesCacheService.invalidateUserLists(imageForQueue.userId);
-      await this.queuePrewarmActiveRenderVariants(imageForQueue);
+      if (response.queued) {
+        await this.queuePrewarmActiveRenderVariants(imageForQueue);
+      }
     }
 
-    return response!;
+    return response;
   }
 
   async resolveThumbnailUrl(
@@ -447,7 +529,7 @@ export class ImageCompositingService {
         (variant) => variant.variantType === VariantType.THUMBNAIL,
       ) ?? null;
 
-    if (!this.canUseRenderedVariants(image)) {
+    if (!this.canServeRenderedVariants(image)) {
       return rawThumbnail
         ? this.storageService.generatePresignedGetUrl(rawThumbnail.storageKey)
         : null;
@@ -489,7 +571,7 @@ export class ImageCompositingService {
     const entries = await Promise.all(
       rawVariants.map(async (variant) => {
         if (
-          !this.canUseRenderedVariants(image) ||
+          !this.canServeRenderedVariants(image) ||
           variant.variantType === VariantType.ORIGINAL ||
           !this.getRenderableVariantTypes(image.is360).includes(
             variant.variantType,
@@ -559,11 +641,54 @@ export class ImageCompositingService {
     return Object.fromEntries(entries);
   }
 
+  async resolveFinalRender(image: Image): Promise<{
+    cdnUrl: string;
+    width: number;
+    height: number;
+    revision: number;
+  } | null> {
+    if (!this.canServeRenderedVariants(image)) {
+      return null;
+    }
+
+    const renderVariant =
+      (await this.renderVariantService.getRenderVariant(
+        image.id,
+        image.activeRenderRevision,
+        VariantType.LARGE,
+      )) ??
+      (await this.renderVariantService.getRenderVariant(
+        image.id,
+        image.activeRenderRevision,
+        VariantType.MEDIUM,
+      ));
+
+    if (!renderVariant) {
+      void this.queuePrewarmActiveRenderVariants(image).catch((err) =>
+        this.logger.warn(
+          `Failed to queue final render prewarm for image ${image.id}: ${
+            err instanceof Error ? err.message : 'unknown error'
+          }`,
+        ),
+      );
+      return null;
+    }
+
+    return {
+      cdnUrl: await this.storageService.generatePresignedGetUrl(
+        renderVariant.storageKey,
+      ),
+      width: renderVariant.width,
+      height: renderVariant.height,
+      revision: image.activeRenderRevision,
+    };
+  }
+
   async prewarmActiveRenderVariants(imageId: string): Promise<void> {
     const image = await this.imageRepository.findOne({
       where: { id: imageId },
     });
-    if (!image || !this.canUseRenderedVariants(image)) {
+    if (!image || !this.hasActiveFrameRenderState(image)) {
       return;
     }
 
@@ -578,10 +703,12 @@ export class ImageCompositingService {
       await sharp(originalBuffer).metadata(),
     );
     const context: RenderSourceContext = {
+      renderMode: this.resolveRenderModeFromImage(image),
+      frameSnapshotAssetType: this.resolveFrameSnapshotAssetType(image),
       originalBuffer,
       snapshotBuffer,
-      frameCanvas: extractSvgCanvasDimensions(snapshotBuffer),
-      placement: this.getImagePlacement(image),
+      canvas: await this.resolveSnapshotCanvas(image, snapshotBuffer),
+      placement: await this.resolveRenderPlacement(image),
       sourceWidth: orientedDimensions.width,
       sourceHeight: orientedDimensions.height,
       transform: this.getRenderTransform(image),
@@ -593,7 +720,7 @@ export class ImageCompositingService {
   }
 
   async queuePrewarmActiveRenderVariants(image: Image | null): Promise<void> {
-    if (!image || !this.canUseRenderedVariants(image)) {
+    if (!image || !this.hasActiveFrameRenderState(image)) {
       return;
     }
 
@@ -715,81 +842,253 @@ export class ImageCompositingService {
     context: RenderSourceContext,
     config: VariantConfig,
   ): Promise<{ buffer: Buffer; width: number; height: number }> {
+    if (context.renderMode === 'scene') {
+      return this.composeSceneVariant(context, config);
+    }
+
+    return this.composeOverlayVariant(context, config);
+  }
+
+  private async resolveRenderSourceContext(
+    image: Image,
+    context?: RenderSourceContext,
+  ): Promise<RenderSourceContext> {
+    if (context) {
+      return context;
+    }
+
+    const originalBuffer = await this.storageService.getObjectBuffer(
+      image.storageKey,
+    );
+    const snapshotBuffer = await this.storageService.getObjectBuffer(
+      image.frameSnapshotKey!,
+    );
+    const orientedDimensions = resolveAutoOrientedDimensions(
+      await sharp(originalBuffer).metadata(),
+    );
+
+    return {
+      renderMode: this.resolveRenderModeFromImage(image),
+      frameSnapshotAssetType: this.resolveFrameSnapshotAssetType(image),
+      originalBuffer,
+      snapshotBuffer,
+      canvas: await this.resolveSnapshotCanvas(image, snapshotBuffer),
+      placement: await this.resolveRenderPlacement(image),
+      sourceWidth: orientedDimensions.width,
+      sourceHeight: orientedDimensions.height,
+      transform: this.getRenderTransform(image),
+    };
+  }
+
+  private getVariantConfig(
+    variantType: VariantType,
+    is360: boolean,
+  ): VariantConfig | null {
+    if (variantType === VariantType.PANORAMIC_PREVIEW && !is360) {
+      return null;
+    }
+
+    const variants = this.configService.get<Record<string, VariantConfig>>(
+      'image.variants',
+      {},
+    );
+
+    return variants[variantType] ?? null;
+  }
+
+  private getRenderableVariantTypes(is360: boolean): VariantType[] {
+    const variants = [
+      VariantType.THUMBNAIL,
+      VariantType.MEDIUM,
+      VariantType.LARGE,
+    ];
+
+    if (is360) {
+      variants.push(VariantType.PANORAMIC_PREVIEW);
+    }
+
+    return variants;
+  }
+
+  private canServeRenderedVariants(image: Image): boolean {
+    return (
+      this.hasActiveFrameRenderState(image) &&
+      [FrameRenderStatus.READY, FrameRenderStatus.PENDING_REPROCESS].includes(
+        image.frameRenderStatus,
+      )
+    );
+  }
+
+  private hasActiveFrameRenderState(image: Image): boolean {
+    return (
+      Boolean(image.frameId) &&
+      Boolean(image.frameSnapshotKey) &&
+      image.activeRenderRevision > 0
+    );
+  }
+
+  private async resolveRenderPlacement(
+    image: Image,
+  ): Promise<FrameRenderPlacement> {
+    if (image.framePlacement) {
+      if (isFrameScenePlacement(image.framePlacement)) {
+        return snapshotFrameRenderPlacement(image.framePlacement);
+      }
+
+      if (!isDefaultFrameImagePlacement(image.framePlacement)) {
+        return snapshotFrameImagePlacement(image.framePlacement);
+      }
+    }
+
+    const fallbackPlacement = await this.resolveCurrentFramePlacement(image);
+    if (fallbackPlacement) {
+      return fallbackPlacement;
+    }
+
+    return snapshotFrameImagePlacement(
+      (image.framePlacement as FrameImagePlacement | null) ??
+        DEFAULT_FRAME_IMAGE_PLACEMENT,
+    );
+  }
+
+  private async resolveImagePlacement(
+    image: Image,
+  ): Promise<FrameImagePlacement> {
+    const placement = await this.resolveRenderPlacement(image);
+    if (isFrameScenePlacement(placement)) {
+      throw new BusinessException(
+        'FRAME_IMAGE_PLACEMENT_REQUIRED',
+        'A rectangular frame placement is required for overlay rendering.',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    return placement;
+  }
+
+  private async resolveCurrentFramePlacement(
+    image: Pick<Image, 'id' | 'frameId'>,
+  ): Promise<FrameRenderPlacement | null> {
+    if (!image.frameId) {
+      return null;
+    }
+
+    try {
+      const renderSource =
+        await this.frameAssetsService.getFrameRenderSourceInfo(image.frameId);
+
+      if (
+        !isFrameScenePlacement(renderSource.placement) &&
+        isDefaultFrameImagePlacement(renderSource.placement)
+      ) {
+        return null;
+      }
+
+      return snapshotFrameRenderPlacement(renderSource.placement);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to resolve current frame placement for image ${image.id}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private getRenderTransform(image: Image): RenderTransformV1 {
+    return resolveRenderTransform(image.renderTransform);
+  }
+
+  private buildFrameSnapshotKey(
+    imageId: string,
+    revision: number,
+    assetType: FrameAssetType,
+  ): string {
+    const extension =
+      assetType === FrameAssetType.SCENE_BASE_PNG ? 'png' : 'svg';
+    return `image-frame-snapshots/${imageId}/rev-${revision}/frame.${extension}`;
+  }
+
+  private buildRenderStorageKey(
+    imageId: string,
+    revision: number,
+    variantType: VariantType,
+  ): string {
+    return `image-renders/${imageId}/rev-${revision}/${variantType}.jpg`;
+  }
+
+  private getNextRenderRevision(activeRevision: number): number {
+    return Math.max(1, activeRevision + 1);
+  }
+
+  private getRenderLockKey(
+    imageId: string,
+    revision: number,
+    variantType: VariantType,
+  ): string {
+    return `image:render:lock:${imageId}:rev:${revision}:${variantType}`;
+  }
+
+  private async deleteSnapshotAndReclaimQuota(
+    userId: string | undefined,
+    snapshotKey: string,
+    snapshotSize: number,
+  ): Promise<void> {
+    try {
+      await this.storageService.deleteObject(snapshotKey);
+      if (userId && snapshotSize > 0) {
+        await this.storageQuotaService.reclaimVariantUsage(
+          userId,
+          snapshotSize,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete frame snapshot ${snapshotKey}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async deleteSnapshotQuietly(snapshotKey: string): Promise<void> {
+    try {
+      await this.storageService.deleteObject(snapshotKey);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to delete temporary frame snapshot ${snapshotKey}: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
+  }
+
+  private async sleep(ms: number): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private async composeOverlayVariant(
+    context: RenderSourceContext,
+    config: VariantConfig,
+  ): Promise<{ buffer: Buffer; width: number; height: number }> {
     const output = resolveFramedRenderDimensions(
-      context.frameCanvas,
+      context.canvas,
       config.maxWidth,
       config.maxHeight,
     );
-    const placement = resolvePlacementRect(output, context.placement);
-    const transformedPlacement = resolveTransformPlacement({
-      sourceWidth: context.sourceWidth,
-      sourceHeight: context.sourceHeight,
-      windowWidth: placement.width,
-      windowHeight: placement.height,
-      transform: context.transform,
-    });
-    const rotatedImageBuffer = await sharp(context.originalBuffer)
-      .rotate()
-      .resize({
-        width: transformedPlacement.scaledSourceWidth,
-        height: transformedPlacement.scaledSourceHeight,
-        fit: sharp.fit.fill,
-        withoutEnlargement: false,
-      })
-      .rotate(transformedPlacement.transform.rotation, {
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      })
-      .png()
-      .toBuffer();
-    const rotatedImageMetadata = await sharp(rotatedImageBuffer).metadata();
-    const placedImageComposite = resolveCompositeCrop({
-      overlayLeft: transformedPlacement.left,
-      overlayTop: transformedPlacement.top,
-      overlayWidth:
-        rotatedImageMetadata.width ??
-        Math.max(1, Math.ceil(transformedPlacement.rotatedWidth)),
-      overlayHeight:
-        rotatedImageMetadata.height ??
-        Math.max(1, Math.ceil(transformedPlacement.rotatedHeight)),
-      canvasWidth: placement.width,
-      canvasHeight: placement.height,
-    });
-    const croppedPlacedImageBuffer = placedImageComposite
-      ? await sharp(rotatedImageBuffer)
-          .extract({
-            left: placedImageComposite.inputLeft,
-            top: placedImageComposite.inputTop,
-            width: placedImageComposite.inputWidth,
-            height: placedImageComposite.inputHeight,
-          })
-          .png()
-          .toBuffer()
-      : null;
-    const placedImageBuffer = await sharp({
-      create: {
-        width: placement.width,
-        height: placement.height,
-        channels: 4,
-        background: { r: 0, g: 0, b: 0, alpha: 0 },
-      },
-    })
-      .composite(
-        croppedPlacedImageBuffer && placedImageComposite
-          ? [
-              {
-                input: croppedPlacedImageBuffer,
-                top: placedImageComposite.targetTop,
-                left: placedImageComposite.targetLeft,
-              },
-            ]
-          : [],
-      )
-      .png()
-      .toBuffer();
+    const placement = resolvePlacementRect(
+      output,
+      context.placement as FrameImagePlacement,
+    );
+    const placedImageBuffer = await this.renderPhotoWindowLayer(
+      context.originalBuffer,
+      placement.width,
+      placement.height,
+      context.sourceWidth,
+      context.sourceHeight,
+      context.transform,
+    );
 
-    // Materialize the photo layer first. Reusing the same Sharp pipeline for a
-    // second composite call causes the earlier composite to be replaced, which
-    // drops the image layer and leaves a blank window under the frame overlay.
     const baseCanvasBuffer = await sharp({
       create: {
         width: output.width,
@@ -864,145 +1163,278 @@ export class ImageCompositingService {
     };
   }
 
-  private async resolveRenderSourceContext(
-    image: Image,
-    context?: RenderSourceContext,
-  ): Promise<RenderSourceContext> {
-    if (context) {
-      return context;
-    }
+  private async composeSceneVariant(
+    context: RenderSourceContext,
+    config: VariantConfig,
+  ): Promise<{ buffer: Buffer; width: number; height: number }> {
+    const placement = context.placement as FrameScenePlacement;
+    const output = resolveFramedRenderDimensions(
+      context.canvas,
+      config.maxWidth,
+      config.maxHeight,
+    );
+    const baseSceneBuffer = await sharp(context.snapshotBuffer)
+      .resize(output.width, output.height, {
+        fit: sharp.fit.fill,
+        withoutEnlargement: false,
+      })
+      .png()
+      .toBuffer();
+    const scaled = this.scaleScenePlacement(
+      placement,
+      output.width,
+      output.height,
+    );
+    const planeWidth = Math.max(
+      1,
+      Math.round(
+        Math.max(
+          this.pointDistance(scaled.topLeft, scaled.topRight),
+          this.pointDistance(scaled.bottomLeft, scaled.bottomRight),
+        ),
+      ),
+    );
+    const planeHeight = Math.max(
+      1,
+      Math.round(
+        Math.max(
+          this.pointDistance(scaled.topLeft, scaled.bottomLeft),
+          this.pointDistance(scaled.topRight, scaled.bottomRight),
+        ),
+      ),
+    );
+    const photoPlaneBuffer = await this.renderPhotoWindowLayer(
+      context.originalBuffer,
+      planeWidth,
+      planeHeight,
+      context.sourceWidth,
+      context.sourceHeight,
+      context.transform,
+    );
 
-    const originalBuffer = await this.storageService.getObjectBuffer(
-      image.storageKey,
-    );
-    const snapshotBuffer = await this.storageService.getObjectBuffer(
-      image.frameSnapshotKey!,
-    );
-    const orientedDimensions = resolveAutoOrientedDimensions(
-      await sharp(originalBuffer).metadata(),
-    );
+    const horizontal = {
+      x: scaled.topRight.x - scaled.topLeft.x,
+      y: scaled.topRight.y - scaled.topLeft.y,
+    };
+    const vertical = {
+      x: scaled.bottomLeft.x - scaled.topLeft.x,
+      y: scaled.bottomLeft.y - scaled.topLeft.y,
+    };
+    const clipPoints = [
+      `${this.formatSvgNumber(scaled.topLeft.x)},${this.formatSvgNumber(scaled.topLeft.y)}`,
+      `${this.formatSvgNumber(scaled.topRight.x)},${this.formatSvgNumber(scaled.topRight.y)}`,
+      `${this.formatSvgNumber(scaled.bottomRight.x)},${this.formatSvgNumber(scaled.bottomRight.y)}`,
+      `${this.formatSvgNumber(scaled.bottomLeft.x)},${this.formatSvgNumber(scaled.bottomLeft.y)}`,
+    ].join(' ');
+    const composedSvg = [
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${output.width}" height="${output.height}" viewBox="0 0 ${output.width} ${output.height}">`,
+      '  <defs>',
+      '    <clipPath id="scene-plane-clip">',
+      `      <polygon points="${clipPoints}" />`,
+      '    </clipPath>',
+      '  </defs>',
+      `  <image x="0" y="0" width="${output.width}" height="${output.height}" preserveAspectRatio="none" href="${this.toDataUri(baseSceneBuffer, 'image/png')}" />`,
+      '  <g clip-path="url(#scene-plane-clip)">',
+      `    <image x="0" y="0" width="${planeWidth}" height="${planeHeight}" preserveAspectRatio="none" transform="matrix(${this.formatSvgNumber(horizontal.x / planeWidth)} ${this.formatSvgNumber(horizontal.y / planeWidth)} ${this.formatSvgNumber(vertical.x / planeHeight)} ${this.formatSvgNumber(vertical.y / planeHeight)} ${this.formatSvgNumber(scaled.topLeft.x)} ${this.formatSvgNumber(scaled.topLeft.y)})" href="${this.toDataUri(photoPlaneBuffer, 'image/png')}" />`,
+      '  </g>',
+      '</svg>',
+    ].join('\n');
+
+    const compositedBuffer = await sharp(Buffer.from(composedSvg, 'utf8'), {
+      density: 300,
+    })
+      .resize(output.width, output.height, {
+        fit: sharp.fit.fill,
+        withoutEnlargement: false,
+      })
+      .flatten({ background: '#ffffff' })
+      .jpeg({
+        quality: config.quality,
+        progressive: true,
+        mozjpeg: true,
+      })
+      .toBuffer();
 
     return {
-      originalBuffer,
-      snapshotBuffer,
-      frameCanvas: extractSvgCanvasDimensions(snapshotBuffer),
-      placement: this.getImagePlacement(image),
-      sourceWidth: orientedDimensions.width,
-      sourceHeight: orientedDimensions.height,
-      transform: this.getRenderTransform(image),
+      buffer: compositedBuffer,
+      width: output.width,
+      height: output.height,
     };
   }
 
-  private getVariantConfig(
-    variantType: VariantType,
-    is360: boolean,
-  ): VariantConfig | null {
-    if (variantType === VariantType.PANORAMIC_PREVIEW && !is360) {
-      return null;
-    }
+  private async renderPhotoWindowLayer(
+    originalBuffer: Buffer,
+    canvasWidth: number,
+    canvasHeight: number,
+    sourceWidth: number,
+    sourceHeight: number,
+    transform: RenderTransformV1,
+  ): Promise<Buffer> {
+    const transformedPlacement = resolveTransformPlacement({
+      sourceWidth,
+      sourceHeight,
+      windowWidth: canvasWidth,
+      windowHeight: canvasHeight,
+      transform,
+    });
+    const rotatedImageBuffer = await sharp(originalBuffer)
+      .rotate()
+      .resize({
+        width: transformedPlacement.scaledSourceWidth,
+        height: transformedPlacement.scaledSourceHeight,
+        fit: sharp.fit.fill,
+        withoutEnlargement: false,
+      })
+      .rotate(transformedPlacement.transform.rotation, {
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      })
+      .png()
+      .toBuffer();
+    const rotatedImageMetadata = await sharp(rotatedImageBuffer).metadata();
+    const placedImageComposite = resolveCompositeCrop({
+      overlayLeft: transformedPlacement.left,
+      overlayTop: transformedPlacement.top,
+      overlayWidth:
+        rotatedImageMetadata.width ??
+        Math.max(1, Math.ceil(transformedPlacement.rotatedWidth)),
+      overlayHeight:
+        rotatedImageMetadata.height ??
+        Math.max(1, Math.ceil(transformedPlacement.rotatedHeight)),
+      canvasWidth,
+      canvasHeight,
+    });
+    const croppedPlacedImageBuffer = placedImageComposite
+      ? await sharp(rotatedImageBuffer)
+          .extract({
+            left: placedImageComposite.inputLeft,
+            top: placedImageComposite.inputTop,
+            width: placedImageComposite.inputWidth,
+            height: placedImageComposite.inputHeight,
+          })
+          .png()
+          .toBuffer()
+      : null;
 
-    const variants = this.configService.get<Record<string, VariantConfig>>(
-      'image.variants',
-      {},
-    );
-
-    return variants[variantType] ?? null;
-  }
-
-  private getRenderableVariantTypes(is360: boolean): VariantType[] {
-    const variants = [
-      VariantType.THUMBNAIL,
-      VariantType.MEDIUM,
-      VariantType.LARGE,
-    ];
-
-    if (is360) {
-      variants.push(VariantType.PANORAMIC_PREVIEW);
-    }
-
-    return variants;
-  }
-
-  private canUseRenderedVariants(image: Image): boolean {
-    return (
-      Boolean(image.frameId) &&
-      Boolean(image.frameSnapshotKey) &&
-      image.activeRenderRevision > 0 &&
-      [FrameRenderStatus.READY, FrameRenderStatus.PENDING_REPROCESS].includes(
-        image.frameRenderStatus,
+    return sharp({
+      create: {
+        width: canvasWidth,
+        height: canvasHeight,
+        channels: 4,
+        background: { r: 0, g: 0, b: 0, alpha: 0 },
+      },
+    })
+      .composite(
+        croppedPlacedImageBuffer && placedImageComposite
+          ? [
+              {
+                input: croppedPlacedImageBuffer,
+                top: placedImageComposite.targetTop,
+                left: placedImageComposite.targetLeft,
+              },
+            ]
+          : [],
       )
+      .png()
+      .toBuffer();
+  }
+
+  private async resolveSnapshotCanvas(
+    image: Image,
+    snapshotBuffer: Buffer,
+  ): Promise<SvgCanvasDimensions> {
+    const assetType = this.resolveFrameSnapshotAssetType(image);
+    if (assetType === FrameAssetType.SCENE_BASE_PNG) {
+      const metadata = await sharp(snapshotBuffer).metadata();
+      return {
+        width: metadata.width ?? image.width ?? 1,
+        height: metadata.height ?? image.height ?? 1,
+      };
+    }
+
+    return extractSvgCanvasDimensions(snapshotBuffer);
+  }
+
+  private resolveFrameSnapshotAssetType(
+    image: Pick<Image, 'frameSnapshotAssetType' | 'frameSnapshotKey'>,
+  ): FrameAssetType {
+    if (image.frameSnapshotAssetType) {
+      return image.frameSnapshotAssetType;
+    }
+
+    return image.frameSnapshotKey?.toLowerCase().endsWith('.png')
+      ? FrameAssetType.SCENE_BASE_PNG
+      : FrameAssetType.SVG;
+  }
+
+  private resolveRenderModeFromImage(image: Image): 'overlay' | 'scene' {
+    if (
+      this.resolveFrameSnapshotAssetType(image) ===
+        FrameAssetType.SCENE_BASE_PNG ||
+      isFrameScenePlacement(image.framePlacement)
+    ) {
+      return 'scene';
+    }
+
+    return 'overlay';
+  }
+
+  private shouldRefreshCurrentPlacement(
+    placement: FrameRenderPlacement | null,
+  ): boolean {
+    if (!placement) {
+      return true;
+    }
+
+    return (
+      !isFrameScenePlacement(placement) &&
+      isDefaultFrameImagePlacement(placement)
     );
   }
 
-  private getImagePlacement(image: Image): FrameImagePlacement {
-    return snapshotFrameImagePlacement(
-      image.framePlacement ?? DEFAULT_FRAME_IMAGE_PLACEMENT,
-    );
+  private scaleScenePlacement(
+    placement: FrameScenePlacement,
+    width: number,
+    height: number,
+  ): Record<
+    'topLeft' | 'topRight' | 'bottomRight' | 'bottomLeft',
+    { x: number; y: number }
+  > {
+    return {
+      topLeft: {
+        x: placement.corners.topLeft.x * width,
+        y: placement.corners.topLeft.y * height,
+      },
+      topRight: {
+        x: placement.corners.topRight.x * width,
+        y: placement.corners.topRight.y * height,
+      },
+      bottomRight: {
+        x: placement.corners.bottomRight.x * width,
+        y: placement.corners.bottomRight.y * height,
+      },
+      bottomLeft: {
+        x: placement.corners.bottomLeft.x * width,
+        y: placement.corners.bottomLeft.y * height,
+      },
+    };
   }
 
-  private getRenderTransform(image: Image): RenderTransformV1 {
-    return resolveRenderTransform(image.renderTransform);
+  private pointDistance(
+    left: { x: number; y: number },
+    right: { x: number; y: number },
+  ): number {
+    return Math.hypot(left.x - right.x, left.y - right.y);
   }
 
-  private buildFrameSnapshotKey(imageId: string, revision: number): string {
-    return `image-frame-snapshots/${imageId}/rev-${revision}/frame.svg`;
+  private toDataUri(buffer: Buffer, mimeType: string): string {
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
   }
 
-  private buildRenderStorageKey(
-    imageId: string,
-    revision: number,
-    variantType: VariantType,
-  ): string {
-    return `image-renders/${imageId}/rev-${revision}/${variantType}.jpg`;
-  }
-
-  private getNextRenderRevision(activeRevision: number): number {
-    return Math.max(1, activeRevision + 1);
-  }
-
-  private getRenderLockKey(
-    imageId: string,
-    revision: number,
-    variantType: VariantType,
-  ): string {
-    return `image:render:lock:${imageId}:rev:${revision}:${variantType}`;
-  }
-
-  private async deleteSnapshotAndReclaimQuota(
-    userId: string | undefined,
-    snapshotKey: string,
-    snapshotSize: number,
-  ): Promise<void> {
-    try {
-      await this.storageService.deleteObject(snapshotKey);
-      if (userId && snapshotSize > 0) {
-        await this.storageQuotaService.reclaimVariantUsage(
-          userId,
-          snapshotSize,
-        );
-      }
-    } catch (error) {
-      this.logger.warn(
-        `Failed to delete frame snapshot ${snapshotKey}: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
+  private formatSvgNumber(value: number): string {
+    if (Number.isInteger(value)) {
+      return String(value);
     }
-  }
 
-  private async deleteSnapshotQuietly(snapshotKey: string): Promise<void> {
-    try {
-      await this.storageService.deleteObject(snapshotKey);
-    } catch (error) {
-      this.logger.warn(
-        `Failed to delete temporary frame snapshot ${snapshotKey}: ${
-          error instanceof Error ? error.message : 'unknown error'
-        }`,
-      );
-    }
-  }
-
-  private async sleep(ms: number): Promise<void> {
-    await new Promise((resolve) => setTimeout(resolve, ms));
+    return value.toFixed(3).replace(/\.?0+$/, '');
   }
 }

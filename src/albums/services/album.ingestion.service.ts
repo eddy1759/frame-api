@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { BusinessException } from '../../common/filters/business.exception';
 import { AlbumImageAddedJobData } from '../../common/queue/queue.constants';
+import { Frame } from '../../frames/entities/frame.entity';
 import { Image } from '../../images/entities/image.entity';
 import { ImageRenderVariant } from '../../images/entities/image-render-variant.entity';
 import { VariantType } from '../../images/types/image.types';
@@ -17,6 +18,8 @@ export class AlbumIngestionService {
     private readonly albumRepository: Repository<Album>,
     @InjectRepository(AlbumItem)
     private readonly albumItemRepository: Repository<AlbumItem>,
+    @InjectRepository(Frame)
+    private readonly frameRepository: Repository<Frame>,
     @InjectRepository(Image)
     private readonly imageRepository: Repository<Image>,
     @InjectRepository(ImageRenderVariant)
@@ -63,7 +66,11 @@ export class AlbumIngestionService {
       );
     }
 
-    if (!image.frameId || image.frameId !== album.frameId) {
+    const isAlbumFrameCompatible = image.frameId
+      ? await this.isFrameCompatibleWithAlbumFrame(album.frameId, image.frameId)
+      : false;
+
+    if (!isAlbumFrameCompatible) {
       throw new BusinessException(
         'ALBUM_FRAME_MISMATCH',
         'Image frame does not match the album frame.',
@@ -172,5 +179,61 @@ export class AlbumIngestionService {
       (error as { constraint?: string }).constraint ===
         'idx_album_item_album_image'
     );
+  }
+
+  private async isFrameCompatibleWithAlbumFrame(
+    albumFrameId: string,
+    imageFrameId: string,
+  ): Promise<boolean> {
+    let currentFrameId: string | null = imageFrameId;
+    const visited = new Set<string>();
+
+    while (currentFrameId) {
+      if (currentFrameId === albumFrameId) {
+        return true;
+      }
+
+      if (visited.has(currentFrameId)) {
+        return false;
+      }
+      visited.add(currentFrameId);
+
+      const frame = await this.frameRepository.findOne({
+        where: { id: currentFrameId },
+        select: ['id', 'metadata'],
+      });
+
+      if (!frame) {
+        return false;
+      }
+
+      currentFrameId = this.resolvePersonalizationSourceFrameId(frame.metadata);
+    }
+
+    return false;
+  }
+
+  private resolvePersonalizationSourceFrameId(
+    metadata: Frame['metadata'] | null | undefined,
+  ): string | null {
+    if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+      return null;
+    }
+
+    const personalization = (metadata as { personalization?: unknown })
+      .personalization;
+    if (
+      !personalization ||
+      typeof personalization !== 'object' ||
+      Array.isArray(personalization)
+    ) {
+      return null;
+    }
+
+    const sourceFrameId = (personalization as { sourceFrameId?: unknown })
+      .sourceFrameId;
+    return typeof sourceFrameId === 'string' && sourceFrameId.trim()
+      ? sourceFrameId
+      : null;
   }
 }

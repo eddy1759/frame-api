@@ -15,6 +15,7 @@ import {
   queueConfig,
   storageConfig,
   imageConfig,
+  aiConfig,
   validate,
 } from './common/config';
 import { JwtConfig } from './common/config/jwt.config';
@@ -27,6 +28,7 @@ import { FramesModule } from './frames/frames.module';
 import { AlbumsModule } from './albums/albums.module';
 import { QueueModule } from './common/queue/queue.module';
 import { ImagesModule } from './images/images.module';
+import { AiFramesModule } from './ai-frames/ai-frames.module';
 
 @Module({
   imports: [
@@ -40,6 +42,7 @@ import { ImagesModule } from './images/images.module';
         queueConfig,
         storageConfig,
         imageConfig,
+        aiConfig,
       ],
       validate,
       envFilePath: ['.env'],
@@ -86,6 +89,7 @@ import { ImagesModule } from './images/images.module';
     AlbumsModule,
     QueueModule,
     ImagesModule,
+    AiFramesModule,
   ],
   controllers: [],
   providers: [AppService],

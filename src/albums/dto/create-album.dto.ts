@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateAlbumDto {
   @ApiProperty({
@@ -9,14 +15,13 @@ export class CreateAlbumDto {
   @IsUUID()
   frameId: string;
 
-  @ApiPropertyOptional({
-    description:
-      'Optional album name. Defaults to the frame name when omitted.',
+  @ApiProperty({
+    description: 'Album name used as the primary collection identifier.',
   })
-  @IsOptional()
   @IsString()
+  @MinLength(1)
   @MaxLength(255)
-  name?: string;
+  name: string;
 
   @ApiPropertyOptional({
     description: 'Optional public description for the album.',
@@ -25,4 +30,14 @@ export class CreateAlbumDto {
   @IsString()
   @MaxLength(4000)
   description?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Optional personalized short code. Lowercase letters, numbers, and hyphens only after normalization.',
+    example: 'edet-wedding-anniversary',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  shortCode?: string;
 }

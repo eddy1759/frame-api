@@ -17,6 +17,10 @@ describe('StorageService', () => {
     forcePathStyle: true,
     useSsl: false,
     cdnBaseUrl: 'http://localhost:9000/frame-assets',
+    connectionTimeoutMs: 100,
+    socketTimeoutMs: 100,
+    uploadMaxAttempts: 3,
+    uploadBaseDelayMs: 0,
   };
 
   const createService = (): {
@@ -68,9 +72,38 @@ describe('StorageService', () => {
     expect(send).toHaveBeenCalledTimes(1);
   });
 
-  it('throws internal server error when upload fails', async () => {
+  it('retries transient upload failures before succeeding', async () => {
     const { service, send } = createService();
-    send.mockRejectedValueOnce(new Error('upload failed'));
+    send
+      .mockRejectedValueOnce(
+        Object.assign(new Error('read ECONNRESET'), {
+          name: 'TimeoutError',
+          code: 'ECONNRESET',
+        }),
+      )
+      .mockResolvedValueOnce({});
+
+    await expect(
+      service.uploadBuffer(
+        'frames/frame-1/original.svg',
+        Buffer.from('x'),
+        'image/svg+xml',
+      ),
+    ).resolves.toEqual({
+      key: 'frames/frame-1/original.svg',
+      url: 'http://localhost:9000/frame-assets/frames/frame-1/original.svg',
+      size: 1,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('throws internal server error when upload keeps failing', async () => {
+    const { service, send } = createService();
+    send.mockRejectedValue(
+      Object.assign(new Error('upload failed'), {
+        code: 'ECONNRESET',
+      }),
+    );
 
     await expect(
       service.uploadBuffer(
@@ -79,6 +112,7 @@ describe('StorageService', () => {
         'image/svg+xml',
       ),
     ).rejects.toBeInstanceOf(InternalServerErrorException);
+    expect(send).toHaveBeenCalledTimes(3);
   });
 
   it('swallows delete errors', async () => {

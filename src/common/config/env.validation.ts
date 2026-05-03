@@ -68,6 +68,10 @@ class EnvironmentVariables {
   DB_AUTO_RUN_MIGRATIONS?: boolean;
 
   // Redis
+  @IsOptional()
+  @IsString()
+  REDIS_URL?: string;
+
   @IsString()
   @IsNotEmpty()
   REDIS_HOST: string = 'localhost';
@@ -78,6 +82,10 @@ class EnvironmentVariables {
   @IsOptional()
   @IsString()
   REDIS_PASSWORD?: string;
+
+  @IsOptional()
+  @IsString()
+  REDIS_QUEUE_URL?: string;
 
   @IsOptional()
   @IsString()
@@ -186,6 +194,22 @@ class EnvironmentVariables {
   CDN_BASE_URL: string = 'http://localhost:9000/frame-assets';
 
   @IsNumber()
+  @IsOptional()
+  OBJECT_STORAGE_CONNECTION_TIMEOUT_MS: number = 5000;
+
+  @IsNumber()
+  @IsOptional()
+  OBJECT_STORAGE_SOCKET_TIMEOUT_MS: number = 20000;
+
+  @IsNumber()
+  @IsOptional()
+  OBJECT_STORAGE_UPLOAD_MAX_ATTEMPTS: number = 4;
+
+  @IsNumber()
+  @IsOptional()
+  OBJECT_STORAGE_UPLOAD_BASE_DELAY_MS: number = 1000;
+
+  @IsNumber()
   PRESIGNED_URL_EXPIRY: number = 3600;
 
   @IsNumber()
@@ -219,6 +243,74 @@ class EnvironmentVariables {
   @IsOptional()
   @IsNumber()
   QUEUE_REMOVE_ON_FAIL_AGE?: number = 86400;
+
+  @IsOptional()
+  @IsString()
+  AI_PROVIDER?: string = 'dalle3';
+
+  @IsOptional()
+  @IsString()
+  AI_PROVIDER_FALLBACKS?: string;
+
+  @IsOptional()
+  @IsString()
+  AI_SCENE_MODE_ACCESS?: string = 'admin';
+
+  @IsOptional()
+  @IsString()
+  OPENAI_API_KEY?: string;
+
+  @IsOptional()
+  @IsString()
+  STABLE_DIFFUSION_API_KEY?: string;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_DAILY_LIMIT_FREE?: number = 10;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_DAILY_LIMIT_PREMIUM?: number = 50;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_BURST_LIMIT?: number = 5;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_BURST_WINDOW_SECONDS?: number = 60;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_MAX_ITERATIONS_PER_JOB?: number = 10;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_REGEN_COOLDOWN_SECONDS?: number = 15;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_MAX_CONCURRENT_JOBS_PER_USER?: number = 2;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_PENDING_QUEUE_LIMIT_PER_USER?: number = 3;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_APERTURE_INSET_PCT?: number = 0.125;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_STATUS_CACHE_TTL?: number = 30;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_JOB_LIST_CACHE_TTL?: number = 120;
+
+  @IsOptional()
+  @IsNumber()
+  AI_FRAME_PROVIDER_TIMEOUT_MS?: number = 90000;
 }
 
 export function validate(

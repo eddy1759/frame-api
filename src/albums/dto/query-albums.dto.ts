@@ -4,7 +4,6 @@ import {
   IsOptional,
   IsString,
   IsUUID,
-  Matches,
   Max,
   MaxLength,
   Min,
@@ -29,10 +28,12 @@ export class QueryAlbumsDto {
 
   @ApiPropertyOptional({
     example: '3mH8cQpL',
-    description: 'Exact album short code match.',
+    description:
+      'Exact album short code match. Supports both legacy 8-character codes and newer personalized codes.',
   })
   @IsOptional()
-  @Matches(/^[1-9A-HJ-NP-Za-km-z]{8}$/)
+  @IsString()
+  @MaxLength(32)
   shortCode?: string;
 
   @ApiPropertyOptional({
@@ -58,4 +59,13 @@ export class QueryAlbumsDto {
   @IsString()
   @MaxLength(100)
   creator?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Case-insensitive partial search across album name and short code.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
 }

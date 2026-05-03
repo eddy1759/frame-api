@@ -15,6 +15,7 @@ import { User } from './entities/user.entity';
 import { OAuthAccount } from './entities/oauth-account.entity';
 import { RefreshToken } from './entities/refresh-token.entity';
 import { UserStatus } from './enums/user-status.enum';
+import { UserRole } from './enums/user-role.enum';
 import { OAuthProvider } from './enums/oauth-provider.enum';
 import {
   JwtPayload,
@@ -28,6 +29,7 @@ import { AUTH } from './constants/auth.constants';
 import { RedisService } from '../common/redis/redis.service';
 import { OAuthProviderFactory } from './providers/oauth-provider.factory';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { DUMMY_PASSWORD_HASH, verifyPassword } from './utils/password.util';
 
 // â”€â”€â”€ Type for session data stored in Redis â”€â”€â”€
 interface SessionData {
@@ -183,23 +185,45 @@ export class AuthService {
       });
     }
 
-    // 4. Update last login timestamp
-    await this.userRepository.update(user.id, {
-      lastLoginAt: new Date(),
-    });
-    user.lastLoginAt = new Date();
+    return this.completeLogin(user, isNewUser, deviceInfo, ip);
+  }
 
-    // 5. Generate token pair
-    const tokens = await this.generateTokenPair(user, deviceInfo, ip);
+  async adminPasswordSignIn(
+    email: string,
+    password: string,
+    deviceInfo?: DeviceInfo,
+    ip?: string,
+  ): Promise<AuthResponse> {
+    const normalizedEmail = this.normalizeEmail(email);
 
-    // 6. Build response
-    const linkedAccounts = await this.getLinkedAccounts(user.id);
+    const user = await this.userRepository
+      .createQueryBuilder('user')
+      .addSelect('user.passwordHash')
+      .where('LOWER(user.email) = :email', { email: normalizedEmail })
+      .getOne();
 
-    return {
-      ...tokens,
-      user: this.sanitizeUser(user, linkedAccounts),
-      isNewUser,
-    };
+    const passwordHash = user?.passwordHash ?? DUMMY_PASSWORD_HASH;
+    const isPasswordValid = await verifyPassword(password, passwordHash);
+
+    if (
+      !user ||
+      user.role !== UserRole.ADMIN ||
+      user.status !== UserStatus.ACTIVE ||
+      !!user.deletedAt ||
+      !user.passwordHash ||
+      !isPasswordValid
+    ) {
+      this.logger.warn(
+        `Failed admin password sign-in: email=${normalizedEmail}, ip=${ip ?? 'unknown'}`,
+      );
+      throw this.createInvalidAdminCredentialsError();
+    }
+
+    this.logger.log(
+      `Admin password sign-in successful: userId=${user.id}, email=${normalizedEmail}`,
+    );
+
+    return this.completeLogin(user, false, deviceInfo, ip);
   }
 
   // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -658,6 +682,36 @@ export class AuthService {
     return createHash('sha256').update(token).digest('hex');
   }
 
+  private async completeLogin(
+    user: User,
+    isNewUser: boolean,
+    deviceInfo?: DeviceInfo,
+    ip?: string,
+  ): Promise<AuthResponse> {
+    const loginAt = new Date();
+
+    await this.userRepository.update(user.id, {
+      lastLoginAt: loginAt,
+    });
+    user.lastLoginAt = loginAt;
+
+    const tokens = await this.generateTokenPair(user, deviceInfo, ip);
+    const linkedAccounts = await this.getLinkedAccounts(user.id);
+
+    return {
+      ...tokens,
+      user: this.sanitizeUser(user, linkedAccounts),
+      isNewUser,
+    };
+  }
+
+  private createInvalidAdminCredentialsError(): UnauthorizedException {
+    return new UnauthorizedException({
+      code: 'AUTH_INVALID_ADMIN_CREDENTIALS',
+      message: 'Invalid email or password.',
+    });
+  }
+
   private async blacklistAccessToken(
     accessToken: string,
     userId: string,
@@ -725,5 +779,9 @@ export class AuthService {
 
   private isApplePrivateRelay(email: string): boolean {
     return email.endsWith('@privaterelay.appleid.com');
+  }
+
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
   }
 }

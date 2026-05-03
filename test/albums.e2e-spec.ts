@@ -50,6 +50,8 @@ const adminUser: User = {
 
 const albumServiceMock = {
   createAlbum: jest.fn(),
+  updateAlbum: jest.fn(),
+  checkShortCodeAvailability: jest.fn(),
   queueAnalyticsUpdate: jest.fn(),
 };
 
@@ -57,6 +59,7 @@ const albumQueryServiceMock = {
   searchAlbums: jest.fn(),
   getAlbumDetail: jest.fn(),
   listAlbumImages: jest.fn(),
+  getAlbumImageDetail: jest.fn(),
 };
 
 const albumIngestionServiceMock = {
@@ -171,6 +174,22 @@ describe('Albums API (e2e)', () => {
       isPublic: true,
       sharePath: '/albums/3mH8cQpL',
     });
+    albumServiceMock.updateAlbum.mockResolvedValue({
+      id: 'album-1',
+      shortCode: 'my-wedding-album',
+      frameId: 'frame-1',
+      ownerId: user.id,
+      name: 'My Wedding Album',
+      description: 'Updated',
+      isPublic: true,
+      sharePath: '/albums/my-wedding-album',
+    });
+    albumServiceMock.checkShortCodeAvailability.mockResolvedValue({
+      shortCode: 'my-wedding-album',
+      available: true,
+      valid: true,
+      message: 'Short code is available.',
+    });
     albumQueryServiceMock.searchAlbums.mockResolvedValue({
       data: [],
       meta: {
@@ -188,6 +207,7 @@ describe('Albums API (e2e)', () => {
       id: 'album-1',
       shortCode: '3mH8cQpL',
       name: 'My Album',
+      isPublic: true,
       previewItems: [],
     });
     albumQueryServiceMock.listAlbumImages.mockResolvedValue({
@@ -202,6 +222,19 @@ describe('Albums API (e2e)', () => {
           hasPrevious: false,
         },
       },
+    });
+    albumQueryServiceMock.getAlbumImageDetail.mockResolvedValue({
+      id: 'item-1',
+      albumId: '11111111-1111-4111-8111-111111111111',
+      imageId: '22222222-2222-4222-8222-222222222222',
+      frameId: '33333333-3333-4333-8333-333333333333',
+      userId: '44444444-4444-4444-8444-444444444444',
+      imageRenderRevision: 2,
+      thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+      mediumUrl: 'https://cdn.example.com/medium.jpg',
+      largeUrl: 'https://cdn.example.com/large.jpg',
+      isImageOwner: false,
+      createdAt: new Date('2026-05-03T12:00:00.000Z'),
     });
     albumIngestionServiceMock.replayAlbumImage.mockResolvedValue({
       albumId: 'album-1',
@@ -238,6 +271,17 @@ describe('Albums API (e2e)', () => {
       });
 
     await request(app.getHttpServer())
+      .get(
+        '/api/v1/albums/shortcodes/availability?shortCode=My%20Wedding%20Album',
+      )
+      .set('Authorization', 'Bearer album-user-token')
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.available).toBe(true);
+      });
+
+    await request(app.getHttpServer())
       .get('/api/v1/albums/search')
       .expect(200)
       .expect((res) => {
@@ -252,10 +296,31 @@ describe('Albums API (e2e)', () => {
         expect(res.body.data.shortCode).toBe('3mH8cQpL');
       });
 
+    expect(albumQueryServiceMock.searchAlbums).toHaveBeenCalledWith(
+      expect.any(Object),
+      null,
+    );
     expect(albumServiceMock.queueAnalyticsUpdate).toHaveBeenCalledWith(
       'album-1',
       'view',
     );
+  });
+
+  it('allows authenticated owners to update album metadata and personalized shortcodes', async () => {
+    const albumId = '11111111-1111-4111-8111-111111111111';
+
+    await request(app.getHttpServer())
+      .patch(`/api/v1/albums/${albumId}`)
+      .set('Authorization', 'Bearer album-user-token')
+      .send({
+        name: 'My Wedding Album',
+        shortCode: 'My Wedding Album',
+      })
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.shortCode).toBe('my-wedding-album');
+      });
   });
 
   it('restricts replay ingestion to admins while keeping image listing public', async () => {
@@ -287,5 +352,29 @@ describe('Albums API (e2e)', () => {
       .expect((res) => {
         expect(res.body.success).toBe(true);
       });
+  });
+
+  it('returns album-scoped read-only detail for a contributed image', async () => {
+    const albumId = '11111111-1111-4111-8111-111111111111';
+    const imageId = '22222222-2222-4222-8222-222222222222';
+
+    await request(app.getHttpServer())
+      .get(`/api/v1/albums/${albumId}/images/${imageId}`)
+      .set('Authorization', 'Bearer album-user-token')
+      .expect(200)
+      .expect((res) => {
+        expect(res.body.success).toBe(true);
+        expect(res.body.data.imageId).toBe(imageId);
+        expect(res.body.data.isImageOwner).toBe(false);
+        expect(res.body.data.largeUrl).toBe(
+          'https://cdn.example.com/large.jpg',
+        );
+      });
+
+    expect(albumQueryServiceMock.getAlbumImageDetail).toHaveBeenCalledWith(
+      albumId,
+      imageId,
+      null,
+    );
   });
 });

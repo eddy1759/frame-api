@@ -14,6 +14,7 @@ NestJS backend for OAuth authentication, frame catalog management, private image
 ## Companion Docs
 
 - [Hybrid image and frame rendering design](./docs/hybrid-image-frame-rendering.md)
+- [Render + Neon + R2 live testing deployment guide](./docs/render-neon-r2-testing-deployment.md)
 - [Playground frontend README](../frame-api-playground/README.md)
 
 ## Architecture At A Glance
@@ -362,9 +363,9 @@ All routes below are relative to `${API_PREFIX}` unless noted otherwise.
 
 Frame authoring is metadata-first:
 
-1. Admin creates a frame record with dimensions, aspect ratio, orientation, premium flags, sort order, and optional `metadata.imagePlacement`.
-2. Admin uploads an SVG asset.
-3. The API sanitizes the SVG, rejects risky markup, validates the canvas aspect ratio against the frame record, and stores the cleaned SVG.
+1. Admin creates a frame record with dimensions, aspect ratio, orientation, premium flags, sort order, optional `metadata.imagePlacement`, and optional `metadata.titleConfig`.
+2. Admin uploads or regenerates an SVG asset.
+3. The API sanitizes the SVG, rejects risky markup, validates the canvas aspect ratio against the frame record, strips any duplicate frontend-style title text that matches `metadata.titleConfig`, infers a rectangular `metadata.imagePlacement` window from mock-generated SVG apertures when missing, and stores the cleaned SVG.
 4. The API generates:
    - thumbnail small, medium, and large PNGs
    - editor preview PNG
@@ -376,6 +377,9 @@ Important behavior:
 - Frame detail payloads hide premium raw asset URLs from public detail responses.
 - Premium raw access is routed through guarded endpoints instead.
 - `metadata.imagePlacement` defines the normalized photo window used later by image compositing.
+- `metadata.titleConfig` is rendered by the backend into the stored frame SVG and derived thumbnails/previews.
+- When both `imagePlacement` and `titleConfig` are available, the backend keeps the rendered title baseline outside the photo window by relocating overlapping title boxes into the nearest safe frame band.
+- Changing `metadata.titleConfig` alone does not update existing thumbnails or previews; the frame asset must be uploaded or regenerated again to materialize the new title placement.
 
 ## Image Upload, Processing, And Editing Workflow
 

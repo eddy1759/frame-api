@@ -16,6 +16,11 @@ describe('UploadService', () => {
   let albumRepository: jest.Mocked<Repository<Album>>;
   let uploadSessionRepository: jest.Mocked<Repository<UploadSession>>;
   let imageRepository: jest.Mocked<Repository<Image>>;
+  let albumQueryBuilder: {
+    select: jest.Mock;
+    where: jest.Mock;
+    getOne: jest.Mock;
+  };
   const dataSource = {
     transaction: jest.fn(),
   };
@@ -54,8 +59,13 @@ describe('UploadService', () => {
   } as User;
 
   beforeEach(() => {
+    albumQueryBuilder = {
+      select: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn(),
+    };
     albumRepository = {
-      findOne: jest.fn(),
+      createQueryBuilder: jest.fn().mockReturnValue(albumQueryBuilder),
     } as unknown as jest.Mocked<Repository<Album>>;
     uploadSessionRepository = {
       create: jest.fn(),
@@ -103,8 +113,8 @@ describe('UploadService', () => {
     );
   });
 
-  it('uses the album frame and persists albumId when albumShortCode is provided', async () => {
-    albumRepository.findOne.mockResolvedValue({
+  it('uses the album frame and persists albumId when a slug albumShortCode is provided', async () => {
+    albumQueryBuilder.getOne.mockResolvedValue({
       id: 'album-1',
       frameId: 'frame-1',
       isPublic: true,
@@ -116,12 +126,19 @@ describe('UploadService', () => {
         filename: 'photo.jpg',
         mimeType: 'image/jpeg',
         fileSize: 1024,
-        albumShortCode: '3mH8cQpL',
+        albumShortCode: 'family-reunion-2026',
       },
       '127.0.0.1',
       'jest',
     );
 
+    expect(albumRepository.createQueryBuilder).toHaveBeenCalledWith('album');
+    expect(albumQueryBuilder.where).toHaveBeenCalledWith(
+      'LOWER(album.shortCode) = LOWER(:shortCode)',
+      {
+        shortCode: 'family-reunion-2026',
+      },
+    );
     expect(framesService.assertFrameEligibleForImage).toHaveBeenCalledWith(
       'frame-1',
       user,
@@ -135,7 +152,7 @@ describe('UploadService', () => {
   });
 
   it('rejects mismatched client frame ids for album uploads', async () => {
-    albumRepository.findOne.mockResolvedValue({
+    albumQueryBuilder.getOne.mockResolvedValue({
       id: 'album-1',
       frameId: 'frame-1',
       isPublic: true,
@@ -147,7 +164,7 @@ describe('UploadService', () => {
         mimeType: 'image/jpeg',
         fileSize: 1024,
         frameId: 'frame-2',
-        albumShortCode: '3mH8cQpL',
+        albumShortCode: 'family-reunion-2026',
       }),
     ).rejects.toThrow('Album uploads must use the album frame.');
   });

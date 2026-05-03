@@ -99,6 +99,13 @@ export class Frame {
   @JoinColumn({ name: 'created_by' })
   createdBy: User | null;
 
+  @Column({ name: 'generated_by_id', type: 'uuid', nullable: true })
+  generatedById: string | null;
+
+  @ManyToOne(() => User, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'generated_by_id' })
+  generatedBy: User | null;
+
   @ManyToMany(() => Category, (category) => category.frames)
   @JoinTable({
     name: 'frame_categories',

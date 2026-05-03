@@ -163,7 +163,7 @@ export class ImagesController {
   @ApiResponse({
     status: 200,
     description:
-      'Returns signed variant URLs. When a frame is active, thumbnail and display variants are served from composited render-cache outputs; pending changes are reflected via frameRenderStatus and pendingFrameId.',
+      'Returns signed raw variants plus an explicit finalRender artifact when the active composed revision is ready. Pending changes are reflected via frameRenderStatus and pendingFrameId.',
   })
   @ApiResponse({ status: 404, description: 'Image not found.' })
   async getImage(
@@ -235,7 +235,7 @@ export class ImagesController {
   @ApiResponse({
     status: 202,
     description:
-      'Frame reprocess accepted. The active render revision is refreshed and framed cache prewarm is queued when applicable.',
+      'Frame reprocess accepted. Pending edits are promoted, the active render revision advances, and composed render generation is queued when applicable.',
   })
   @ApiResponse({ status: 404, description: 'Image not found.' })
   async reprocessImage(
@@ -247,16 +247,19 @@ export class ImagesController {
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({
     summary: 'Soft-delete an authenticated-user image and reclaim quota',
   })
   @ApiParam({ name: 'id', description: 'Image ID' })
-  @ApiResponse({ status: 204, description: 'Image deleted.' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Image deleted. Returns a standard success envelope with null data.',
+  })
   async deleteImage(
     @CurrentUser('id') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ) {
-    await this.imagesService.deleteImage(id, userId);
+    return this.imagesService.deleteImage(id, userId);
   }
 }

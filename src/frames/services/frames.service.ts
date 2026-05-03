@@ -1,4 +1,4 @@
-﻿import {
+import {
   BadRequestException,
   ForbiddenException,
   Injectable,
@@ -6,7 +6,7 @@
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, SelectQueryBuilder } from 'typeorm';
+import { In, IsNull, Repository, SelectQueryBuilder } from 'typeorm';
 import { Frame } from '../entities/frame.entity';
 import { Category } from '../entities/category.entity';
 import { Tag } from '../entities/tag.entity';
@@ -14,6 +14,7 @@ import { FrameAsset } from '../entities/frame-asset.entity';
 import { FrameAssetType } from '../entities/frame-asset-type.enum';
 import { UserSavedFrame } from '../entities/user-saved-frame.entity';
 import { CreateFrameDto } from '../dto/create-frame.dto';
+import { CustomizeFrameDto } from '../dto/customize-frame.dto';
 import { UpdateFrameDto } from '../dto/update-frame.dto';
 import { QueryFramesDto } from '../dto/query-frames.dto';
 import {
@@ -28,9 +29,14 @@ import { UserRole } from '../../auth/enums/user-role.enum';
 import { FramesCacheService } from './frames-cache.service';
 import { CategoriesService } from './categories.service';
 import { TagsService } from './tags.service';
+import { FrameAssetsService } from './frame-assets.service';
 import {
   FrameMetadata,
   normalizeFrameMetadata,
+  resolveFrameRenderMode,
+  resolveFrameScenePlacementStatus,
+  normalizeFrameTitleText,
+  resolveFrameTitleConfig,
 } from '../utils/frame-metadata.util';
 
 export interface FrameListItem {
@@ -41,6 +47,8 @@ export interface FrameListItem {
   isPremium: boolean;
   price: string | null;
   currency: string;
+  width: number;
+  height: number;
   categories: Array<{ id: string; name: string; slug: string }>;
   tags: Array<{ id: string; name: string; slug: string }>;
   applyCount: number;
@@ -49,8 +57,6 @@ export interface FrameListItem {
 
 export interface FrameDetailItem extends FrameListItem {
   description: string | null;
-  width: number;
-  height: number;
   aspectRatio: string;
   orientation: string;
   metadata: FrameMetadata;
@@ -66,6 +72,11 @@ export interface FrameDetailItem extends FrameListItem {
     fileSize: number;
   }>;
 }
+
+type FrameRequestUser =
+  | Pick<User, 'id' | 'role' | 'subscriptionActive'>
+  | null
+  | undefined;
 
 @Injectable()
 export class FramesService {
@@ -86,6 +97,7 @@ export class FramesService {
     private readonly framesCacheService: FramesCacheService,
     private readonly categoriesService: CategoriesService,
     private readonly tagsService: TagsService,
+    private readonly frameAssetsService: FrameAssetsService,
     @Inject(STORAGE_PORT)
     private readonly storageService: StoragePort,
   ) {}
@@ -212,6 +224,101 @@ export class FramesService {
     return this.getFrameById(updated.id);
   }
 
+  async customizeFrame(
+    frameId: string,
+    user: Pick<User, 'id' | 'role' | 'subscriptionActive'>,
+    dto: CustomizeFrameDto,
+  ): Promise<FrameDetailItem> {
+    await this.assertFrameEligibleForImage(frameId, user);
+
+    const sourceFrame = await this.frameRepository.findOne({
+      where: { id: frameId, isActive: true },
+      relations: ['categories', 'tags'],
+    });
+
+    if (!sourceFrame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    const sourceTitleConfig = resolveFrameTitleConfig(sourceFrame.metadata);
+    if (!sourceTitleConfig) {
+      throw new BadRequestException({
+        code: 'FRAME_TITLE_CONFIG_REQUIRED',
+        message:
+          'This frame does not support title customization because it has no title configuration.',
+      });
+    }
+
+    const customTitle = normalizeFrameTitleText(dto.customTitle, 'customTitle');
+    const personalizedName = this.buildPersonalizedFrameName(
+      sourceFrame.name,
+      customTitle,
+    );
+    const slug = await this.slugService.generateUniqueSlug(
+      personalizedName,
+      (candidate) => this.frameRepository.exist({ where: { slug: candidate } }),
+    );
+
+    const personalizedFrame = await this.frameRepository.save(
+      this.frameRepository.create({
+        name: personalizedName,
+        slug,
+        description: sourceFrame.description,
+        isPremium: sourceFrame.isPremium,
+        price: sourceFrame.price,
+        currency: sourceFrame.currency,
+        width: sourceFrame.width,
+        height: sourceFrame.height,
+        aspectRatio: sourceFrame.aspectRatio,
+        orientation: sourceFrame.orientation,
+        metadata: normalizeFrameMetadata({
+          ...(sourceFrame.metadata ?? {}),
+          titleConfig: {
+            ...sourceTitleConfig,
+            text: customTitle,
+          },
+          personalization: {
+            kind: 'title-customization',
+            sourceFrameId: sourceFrame.id,
+            customTitle,
+          },
+        }),
+        viewCount: 0,
+        applyCount: 0,
+        isActive: true,
+        isAiGenerated: false,
+        sortOrder: sourceFrame.sortOrder,
+        svgUrl: null,
+        thumbnailUrl: null,
+        editorPreviewUrl: null,
+        createdById: sourceFrame.createdById,
+        generatedById: user.id,
+        categories: sourceFrame.categories,
+        tags: sourceFrame.tags,
+      }),
+    );
+
+    try {
+      await this.frameAssetsService.personalizeFrameAssets(
+        sourceFrame.id,
+        personalizedFrame.id,
+        {
+          ...sourceTitleConfig,
+          text: customTitle,
+        },
+      );
+
+      return this.getFrameById(personalizedFrame.id, user);
+    } catch (error) {
+      await this.frameAssetsService.deleteFrameAssets(personalizedFrame.id);
+      await this.frameRepository.delete({ id: personalizedFrame.id });
+      throw error;
+    }
+  }
+
   async softDeleteFrame(id: string): Promise<void> {
     const frame = await this.frameRepository.findOne({
       where: { id },
@@ -279,6 +386,7 @@ export class FramesService {
         .leftJoinAndSelect('frame.categories', 'category')
         .leftJoinAndSelect('frame.tags', 'tag')
         .where('frame.isActive = :isActive', { isActive: true })
+        .andWhere('frame.generatedById IS NULL')
         .distinct(true);
 
       this.applyListFilters(qb, query);
@@ -326,21 +434,34 @@ export class FramesService {
     };
   }
 
-  async getFrameById(id: string, userId?: string): Promise<FrameDetailItem> {
+  async getFrameById(
+    id: string,
+    user?: FrameRequestUser,
+  ): Promise<FrameDetailItem> {
     void this.cacheService.zIncrBy('popular:frames:views', 1, id);
 
-    const cached = await this.framesCacheService.getFrame<FrameDetailItem>(id);
+    const access = await this.frameRepository.findOne({
+      where: { id, isActive: true },
+      select: ['id', 'slug', 'generatedById', 'isPremium'],
+    });
 
-    if (cached) {
-      const isSaved = userId
-        ? await this.userSavedFrameRepository.exist({
-            where: { userId, frameId: cached.id },
-          })
-        : false;
-      return {
-        ...cached,
-        isSaved,
-      };
+    const isPrivateFrame = this.assertPrivateFrameReadable(access, user);
+
+    if (!isPrivateFrame) {
+      const cached =
+        await this.framesCacheService.getFrame<FrameDetailItem>(id);
+
+      if (cached) {
+        const isSaved = user?.id
+          ? await this.userSavedFrameRepository.exist({
+              where: { userId: user.id, frameId: cached.id },
+            })
+          : false;
+        return {
+          ...cached,
+          isSaved,
+        };
+      }
     }
 
     const frame = await this.frameRepository.findOne({
@@ -357,14 +478,17 @@ export class FramesService {
 
     const base = this.mapFrameDetailItem(frame, false);
 
-    await this.framesCacheService.setFrame(id, base);
-    await this.framesCacheService.setFrameBySlug(frame.slug, base);
+    if (!isPrivateFrame) {
+      await this.framesCacheService.setFrame(id, base);
+      await this.framesCacheService.setFrameBySlug(frame.slug, base);
+    }
 
-    const isSaved = userId
-      ? await this.userSavedFrameRepository.exist({
-          where: { userId, frameId: id },
-        })
-      : false;
+    const isSaved =
+      !isPrivateFrame && user?.id
+        ? await this.userSavedFrameRepository.exist({
+            where: { userId: user.id, frameId: id },
+          })
+        : false;
 
     return {
       ...base,
@@ -374,14 +498,14 @@ export class FramesService {
 
   async getFrameBySlug(
     slug: string,
-    userId?: string,
+    user?: FrameRequestUser,
   ): Promise<FrameDetailItem> {
     const cached =
       await this.framesCacheService.getFrameBySlug<FrameDetailItem>(slug);
     if (cached) {
-      const isSaved = userId
+      const isSaved = user?.id
         ? await this.userSavedFrameRepository.exist({
-            where: { userId, frameId: cached.id },
+            where: { userId: user.id, frameId: cached.id },
           })
         : false;
       return {
@@ -391,7 +515,7 @@ export class FramesService {
     }
 
     const frame = await this.frameRepository.findOne({
-      where: { slug, isActive: true },
+      where: { slug, isActive: true, generatedById: IsNull() },
       relations: ['categories', 'tags', 'assets'],
     });
 
@@ -407,9 +531,9 @@ export class FramesService {
     await this.framesCacheService.setFrame(frame.id, base);
     await this.framesCacheService.setFrameBySlug(slug, base);
 
-    const isSaved = userId
+    const isSaved = user?.id
       ? await this.userSavedFrameRepository.exist({
-          where: { userId, frameId: frame.id },
+          where: { userId: user.id, frameId: frame.id },
         })
       : false;
 
@@ -419,7 +543,16 @@ export class FramesService {
     };
   }
 
-  async getFrameSvgUrl(id: string): Promise<{ url: string }> {
+  async getFrameSvgUrl(
+    id: string,
+    user?: FrameRequestUser,
+  ): Promise<{ url: string }> {
+    const access = await this.frameRepository.findOne({
+      where: { id, isActive: true },
+      select: ['id', 'generatedById', 'isPremium'],
+    });
+    this.assertPrivateFrameReadable(access, user);
+
     const [frame, asset] = await Promise.all([
       this.frameRepository.findOne({
         where: { id, isActive: true },
@@ -444,7 +577,16 @@ export class FramesService {
     };
   }
 
-  async getFrameEditorPreviewUrl(id: string): Promise<{ url: string }> {
+  async getFrameEditorPreviewUrl(
+    id: string,
+    user?: FrameRequestUser,
+  ): Promise<{ url: string }> {
+    const access = await this.frameRepository.findOne({
+      where: { id, isActive: true },
+      select: ['id', 'generatedById', 'isPremium'],
+    });
+    this.assertPrivateFrameReadable(access, user);
+
     const [frame, asset] = await Promise.all([
       this.frameRepository.findOne({
         where: { id, isActive: true },
@@ -505,7 +647,7 @@ export class FramesService {
     if (scored.length > 0) {
       const ids = scored.map((item) => item.member);
       const byId = await this.frameRepository.find({
-        where: { id: In(ids), isActive: true },
+        where: { id: In(ids), isActive: true, generatedById: IsNull() },
         relations: ['categories', 'tags'],
       });
       const map = new Map(byId.map((frame) => [frame.id, frame]));
@@ -514,7 +656,7 @@ export class FramesService {
         .filter((value): value is Frame => !!value);
     } else {
       frames = await this.frameRepository.find({
-        where: { isActive: true },
+        where: { isActive: true, generatedById: IsNull() },
         relations: ['categories', 'tags'],
         order: { applyCount: 'DESC', createdAt: 'DESC' },
         take: effectiveLimit,
@@ -542,7 +684,7 @@ export class FramesService {
 
   async recordApply(frameId: string): Promise<void> {
     const exists = await this.frameRepository.exist({
-      where: { id: frameId, isActive: true },
+      where: { id: frameId, isActive: true, generatedById: IsNull() },
     });
 
     if (!exists) {
@@ -557,7 +699,7 @@ export class FramesService {
 
   async saveFrame(frameId: string, userId: string): Promise<void> {
     const exists = await this.frameRepository.exist({
-      where: { id: frameId, isActive: true },
+      where: { id: frameId, isActive: true, generatedById: IsNull() },
     });
 
     if (!exists) {
@@ -598,7 +740,11 @@ export class FramesService {
 
     const qb = this.userSavedFrameRepository
       .createQueryBuilder('saved')
-      .innerJoinAndSelect('saved.frame', 'frame', 'frame.isActive = true')
+      .innerJoinAndSelect(
+        'saved.frame',
+        'frame',
+        'frame.isActive = true AND frame.generatedById IS NULL',
+      )
       .leftJoinAndSelect('frame.categories', 'category')
       .leftJoinAndSelect('frame.tags', 'tag')
       .where('saved.userId = :userId', { userId })
@@ -689,11 +835,11 @@ export class FramesService {
 
   async assertFrameEligibleForImage(
     frameId: string,
-    user?: Pick<User, 'role' | 'subscriptionActive'>,
-  ): Promise<{ id: string; isPremium: boolean }> {
+    user?: Pick<User, 'id' | 'role' | 'subscriptionActive'>,
+  ): Promise<{ id: string; isPremium: boolean; generatedById: string | null }> {
     const frame = await this.frameRepository.findOne({
       where: { id: frameId, isActive: true },
-      select: ['id', 'isPremium'],
+      select: ['id', 'isPremium', 'generatedById'],
     });
 
     if (!frame) {
@@ -705,6 +851,13 @@ export class FramesService {
 
     const isAdmin = user?.role === UserRole.ADMIN;
 
+    if (frame.generatedById && !isAdmin && frame.generatedById !== user?.id) {
+      throw new ForbiddenException({
+        code: 'AI_FRAME_NOT_OWNED',
+        message: 'This AI-generated frame belongs to another user.',
+      });
+    }
+
     if (frame.isPremium && !isAdmin && !user?.subscriptionActive) {
       throw new ForbiddenException({
         code: 'PREMIUM_SUBSCRIPTION_REQUIRED',
@@ -712,9 +865,21 @@ export class FramesService {
       });
     }
 
+    if (
+      resolveFrameRenderMode(frame.metadata) === 'scene' &&
+      resolveFrameScenePlacementStatus(frame.metadata) !== 'ready'
+    ) {
+      throw new ForbiddenException({
+        code: 'FRAME_SCENE_PLACEMENT_REQUIRED',
+        message:
+          'This scene frame is still pending placement annotation and cannot be used yet.',
+      });
+    }
+
     return {
       id: frame.id,
       isPremium: frame.isPremium,
+      generatedById: frame.generatedById,
     };
   }
 
@@ -814,14 +979,18 @@ export class FramesService {
   }
 
   private mapFrameListItem(frame: Frame, isSaved: boolean): FrameListItem {
+    const isPrivateFrame = this.isPrivateFrame(frame);
+
     return {
       id: frame.id,
       name: frame.name,
       slug: frame.slug,
-      thumbnailUrl: frame.thumbnailUrl,
+      thumbnailUrl: isPrivateFrame ? null : frame.thumbnailUrl,
       isPremium: frame.isPremium,
       price: frame.price,
       currency: frame.currency,
+      width: frame.width,
+      height: frame.height,
       categories: (frame.categories ?? []).map((category) => ({
         id: category.id,
         name: category.name,
@@ -838,27 +1007,30 @@ export class FramesService {
   }
 
   private mapFrameDetailItem(frame: Frame, isSaved: boolean): FrameDetailItem {
+    const isPrivateFrame = this.isPrivateFrame(frame);
+
     return {
       ...this.mapFrameListItem(frame, isSaved),
       description: frame.description,
-      width: frame.width,
-      height: frame.height,
       aspectRatio: frame.aspectRatio,
       orientation: frame.orientation,
       metadata: frame.metadata,
-      svgUrl: frame.isPremium ? null : frame.svgUrl,
-      editorPreviewUrl: frame.isPremium ? null : frame.editorPreviewUrl,
+      svgUrl: frame.isPremium || isPrivateFrame ? null : frame.svgUrl,
+      editorPreviewUrl:
+        frame.isPremium || isPrivateFrame ? null : frame.editorPreviewUrl,
       viewCount: frame.viewCount,
-      assets: (frame.assets ?? [])
-        .filter((asset) => this.shouldExposePublicAsset(frame, asset))
-        .map((asset) => ({
-          type: asset.type,
-          url: this.resolveAssetUrl(frame, asset),
-          mimeType: asset.mimeType,
-          width: asset.width,
-          height: asset.height,
-          fileSize: asset.fileSize,
-        })),
+      assets: isPrivateFrame
+        ? []
+        : (frame.assets ?? [])
+            .filter((asset) => this.shouldExposePublicAsset(frame, asset))
+            .map((asset) => ({
+              type: asset.type,
+              url: this.resolveAssetUrl(frame, asset),
+              mimeType: asset.mimeType,
+              width: asset.width,
+              height: asset.height,
+              fileSize: asset.fileSize,
+            })),
     };
   }
 
@@ -875,12 +1047,7 @@ export class FramesService {
       return frame.svgUrl;
     }
 
-    const base = frame.svgUrl ? frame.svgUrl.replace('/original.svg', '') : '';
-    if (base) {
-      return `${base}/${asset.storageKey.split('/').pop() ?? ''}`;
-    }
-
-    return asset.storageKey;
+    return this.storageService.getPublicUrl(asset.storageKey);
   }
 
   private shouldExposePublicAsset(frame: Frame, asset: FrameAsset): boolean {
@@ -888,9 +1055,11 @@ export class FramesService {
       return true;
     }
 
-    return ![FrameAssetType.SVG, FrameAssetType.PREVIEW_PNG].includes(
-      asset.type,
-    );
+    return ![
+      FrameAssetType.SVG,
+      FrameAssetType.SCENE_BASE_PNG,
+      FrameAssetType.PREVIEW_PNG,
+    ].includes(asset.type);
   }
 
   private async getSavedFrameIdSet(
@@ -910,5 +1079,53 @@ export class FramesService {
     });
 
     return new Set(saved.map((item) => item.frameId));
+  }
+
+  private isPrivateFrame(
+    frame: Pick<Frame, 'generatedById'> | null | undefined,
+  ): boolean {
+    return Boolean(frame?.generatedById);
+  }
+
+  private assertPrivateFrameReadable(
+    frame: Pick<Frame, 'generatedById' | 'isPremium'> | null,
+    user?: FrameRequestUser,
+  ): boolean {
+    if (!frame) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    const isPrivateFrame = this.isPrivateFrame(frame);
+    if (!isPrivateFrame) {
+      return false;
+    }
+
+    const isAdmin = user?.role === UserRole.ADMIN;
+    if (!isAdmin && frame.generatedById !== user?.id) {
+      throw new NotFoundException({
+        code: 'FRAME_NOT_FOUND',
+        message: 'Frame with the specified ID does not exist.',
+      });
+    }
+
+    if (frame.isPremium && !isAdmin && !user?.subscriptionActive) {
+      throw new ForbiddenException({
+        code: 'PREMIUM_SUBSCRIPTION_REQUIRED',
+        message: 'This frame requires an active premium subscription.',
+      });
+    }
+
+    return true;
+  }
+
+  private buildPersonalizedFrameName(
+    sourceFrameName: string,
+    customTitle: string,
+  ): string {
+    const candidate = `${sourceFrameName} - ${customTitle}`.trim();
+    return candidate.length <= 255 ? candidate : candidate.slice(0, 255).trim();
   }
 }

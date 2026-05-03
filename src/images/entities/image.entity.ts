@@ -14,7 +14,8 @@ import {
   ImageOrientation,
   ProcessingStatus,
 } from '../types/image.types';
-import type { FrameImagePlacement } from '../../frames/utils/frame-metadata.util';
+import { FrameAssetType } from '../../frames/entities/frame-asset-type.enum';
+import type { FrameRenderPlacement } from '../../frames/utils/frame-metadata.util';
 import type { RenderTransformV1 } from '../utils/render-transform.util';
 
 @Entity('images')
@@ -49,8 +50,16 @@ export class Image {
   @Column({ name: 'frame_snapshot_size', type: 'bigint', nullable: true })
   frameSnapshotSize: number | null;
 
+  @Column({
+    name: 'frame_snapshot_asset_type',
+    type: 'varchar',
+    length: 30,
+    nullable: true,
+  })
+  frameSnapshotAssetType: FrameAssetType | null;
+
   @Column({ name: 'frame_placement', type: 'jsonb', nullable: true })
-  framePlacement: FrameImagePlacement | null;
+  framePlacement: FrameRenderPlacement | null;
 
   @Column({ name: 'render_transform', type: 'jsonb', nullable: true })
   renderTransform: RenderTransformV1 | null;
@@ -73,8 +82,16 @@ export class Image {
   })
   pendingFrameSnapshotSize: number | null;
 
+  @Column({
+    name: 'pending_frame_snapshot_asset_type',
+    type: 'varchar',
+    length: 30,
+    nullable: true,
+  })
+  pendingFrameSnapshotAssetType: FrameAssetType | null;
+
   @Column({ name: 'pending_frame_placement', type: 'jsonb', nullable: true })
-  pendingFramePlacement: FrameImagePlacement | null;
+  pendingFramePlacement: FrameRenderPlacement | null;
 
   @Column({ name: 'pending_render_transform', type: 'jsonb', nullable: true })
   pendingRenderTransform: RenderTransformV1 | null;

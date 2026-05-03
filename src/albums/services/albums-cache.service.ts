@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { CacheService } from '../../common/services';
+import { normalizeAlbumShortCodeLookup } from '../utils/album-shortcode.util';
 
 @Injectable()
 export class AlbumsCacheService {
@@ -117,7 +118,7 @@ export class AlbumsCacheService {
   }
 
   private getAlbumShortCodeKey(shortCode: string): string {
-    return `album:shortcode:${shortCode}`;
+    return `album:shortcode:${normalizeAlbumShortCodeLookup(shortCode)}`;
   }
 
   private getAlbumStatsKey(albumId: string): string {

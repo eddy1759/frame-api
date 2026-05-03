@@ -42,6 +42,15 @@ export class User {
   })
   avatarUrl: string | null;
 
+  @Column({
+    name: 'password_hash',
+    type: 'varchar',
+    length: 255,
+    nullable: true,
+    select: false,
+  })
+  passwordHash?: string | null;
+
   @Index('idx_users_status')
   @Column({
     type: 'varchar',

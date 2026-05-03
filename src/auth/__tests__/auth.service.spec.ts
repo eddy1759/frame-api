@@ -19,6 +19,7 @@ import { OAuthProviderFactory } from '../providers/oauth-provider.factory';
 import { UserStatus } from '../enums/user-status.enum';
 import { UserRole } from '../enums/user-role.enum';
 import { OAuthProvider } from '../enums/oauth-provider.enum';
+import { hashPassword } from '../utils/password.util';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -28,6 +29,17 @@ describe('AuthService', () => {
   let jwtService: jest.Mocked<JwtService>;
   let redisService: jest.Mocked<RedisService>;
   let oauthProviderFactory: jest.Mocked<OAuthProviderFactory>;
+  let mockUserSelectQueryBuilder: {
+    addSelect: jest.Mock;
+    getOne: jest.Mock;
+    where: jest.Mock;
+  };
+  let mockUserUpdateQueryBuilder: {
+    execute: jest.Mock;
+    set: jest.Mock;
+    update: jest.Mock;
+    where: jest.Mock;
+  };
 
   let mockOAuthProvider: {
     validateToken: jest.Mock;
@@ -56,6 +68,18 @@ describe('AuthService', () => {
     createHash('sha256').update(value).digest('hex');
 
   beforeEach(async () => {
+    mockUserSelectQueryBuilder = {
+      addSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue(null),
+    };
+    mockUserUpdateQueryBuilder = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+
     mockOAuthProvider = {
       validateToken: jest.fn().mockResolvedValue({
         providerId: 'google-123',
@@ -128,12 +152,11 @@ describe('AuthService', () => {
             ),
             update: jest.fn().mockResolvedValue({ affected: 1 }),
             softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
-            createQueryBuilder: jest.fn().mockReturnValue({
-              update: jest.fn().mockReturnThis(),
-              set: jest.fn().mockReturnThis(),
-              where: jest.fn().mockReturnThis(),
-              execute: jest.fn().mockResolvedValue({ affected: 1 }),
-            }),
+            createQueryBuilder: jest.fn((alias?: string) =>
+              alias === 'user'
+                ? mockUserSelectQueryBuilder
+                : mockUserUpdateQueryBuilder,
+            ),
           },
         },
         {
@@ -335,6 +358,73 @@ describe('AuthService', () => {
 
       await expect(
         service.oauthLogin(OAuthProvider.GOOGLE, 'valid-token'),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+  });
+
+  describe('adminPasswordSignIn', () => {
+    it('signs in an active admin with a stored password hash', async () => {
+      const password = 'CorrectHorseBatteryStaple!';
+      const adminUser: User = {
+        ...mockUser,
+        id: 'admin-uuid-1',
+        email: 'admin@example.com',
+        role: UserRole.ADMIN,
+        passwordHash: await hashPassword(password),
+      };
+
+      mockUserSelectQueryBuilder.getOne.mockResolvedValue(adminUser);
+
+      const result = await service.adminPasswordSignIn(
+        'Admin@Example.com',
+        password,
+        { platform: 'web' },
+        '203.0.113.10',
+      );
+
+      expect(mockUserSelectQueryBuilder.addSelect).toHaveBeenCalledWith(
+        'user.passwordHash',
+      );
+      expect(result.user.id).toBe(adminUser.id);
+      expect(result.user.role).toBe(UserRole.ADMIN);
+      expect(userRepository.update).toHaveBeenCalledWith(adminUser.id, {
+        lastLoginAt: expect.any(Date),
+      });
+      expect(redisService.setAdd).toHaveBeenCalledWith(
+        `user:sessions:${adminUser.id}`,
+        expect.any(String),
+      );
+    });
+
+    it('rejects non-admin password login attempts with a generic error', async () => {
+      const password = 'CorrectHorseBatteryStaple!';
+      const regularUser: User = {
+        ...mockUser,
+        passwordHash: await hashPassword(password),
+      };
+
+      mockUserSelectQueryBuilder.getOne.mockResolvedValue(regularUser);
+
+      await expect(
+        service.adminPasswordSignIn(regularUser.email!, password),
+      ).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('rejects inactive admin password login attempts with a generic error', async () => {
+      const password = 'CorrectHorseBatteryStaple!';
+      const suspendedAdmin: User = {
+        ...mockUser,
+        id: 'admin-uuid-2',
+        email: 'suspended-admin@example.com',
+        role: UserRole.ADMIN,
+        status: UserStatus.SUSPENDED,
+        passwordHash: await hashPassword(password),
+      };
+
+      mockUserSelectQueryBuilder.getOne.mockResolvedValue(suspendedAdmin);
+
+      await expect(
+        service.adminPasswordSignIn(suspendedAdmin.email!, password),
       ).rejects.toThrow(UnauthorizedException);
     });
   });
